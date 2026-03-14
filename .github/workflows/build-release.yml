@@ -21,7 +21,7 @@ jobs:
             runner: macos-14  # ARM64
             platform: darwin-arm64
           - os: macos-latest
-            runner: macos-13  # x86_64
+            runner: macos-13-xlarge  # x86_64 (requires GitHub Teams/Enterprise)
             platform: darwin-amd64
           - os: ubuntu-latest
             runner: ubuntu-latest
@@ -62,7 +62,7 @@ jobs:
             runner: macos-14  # ARM64
             platform: darwin-arm64
           - os: macos-latest
-            runner: macos-13  # x86_64
+            runner: macos-13-xlarge  # x86_64 (requires GitHub Teams/Enterprise)
             platform: darwin-amd64
           - os: ubuntu-latest
             runner: ubuntu-latest
@@ -103,7 +103,7 @@ jobs:
             runner: macos-14  # ARM64
             platform: darwin-arm64
           - os: macos-latest
-            runner: macos-13  # x86_64
+            runner: macos-13-xlarge  # x86_64 (requires GitHub Teams/Enterprise)
             platform: darwin-amd64
           - os: ubuntu-latest
             runner: ubuntu-latest
