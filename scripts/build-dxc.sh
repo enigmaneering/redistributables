@@ -61,11 +61,12 @@ if [ -n "$CMAKE_ARCH" ]; then
 fi
 
 echo "Configuring DXC..."
-# Note: DXC manages its own LLVM target configuration
-# Don't specify LLVM_TARGETS_TO_BUILD - DXC's build system handles it
+# DXC only needs DXIL target, not full LLVM targets
+# Setting to "None" avoids the default AMDGPU target that doesn't exist in DXC
 cmake .. \
     $CMAKE_ARCH_FLAG \
     -DCMAKE_BUILD_TYPE=Release \
+    -DLLVM_TARGETS_TO_BUILD="None" \
     -DLLVM_INCLUDE_TESTS=OFF \
     -DLLVM_INCLUDE_EXAMPLES=OFF \
     -DLLVM_BUILD_TOOLS=OFF \
