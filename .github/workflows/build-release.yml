@@ -20,9 +20,11 @@ jobs:
           - os: macos-latest
             runner: macos-14  # ARM64
             platform: darwin-arm64
+            macos_arch: arm64
           - os: macos-latest
-            runner: macos-13-xlarge  # x86_64 (requires GitHub Teams/Enterprise)
+            runner: macos-14  # Cross-compile x86_64 on ARM64
             platform: darwin-amd64
+            macos_arch: x86_64
           - os: ubuntu-latest
             runner: ubuntu-latest
             platform: linux-amd64
@@ -45,6 +47,7 @@ jobs:
           BUILD_DIR="${{ runner.temp }}/build" \
           OUTPUT_DIR="${{ runner.temp }}/output" \
           CMAKE_ARCH="${{ matrix.arch || '' }}" \
+          MACOS_ARCH="${{ matrix.macos_arch || '' }}" \
           bash scripts/build-glslang.sh
 
       - name: Upload artifact
@@ -61,9 +64,11 @@ jobs:
           - os: macos-latest
             runner: macos-14  # ARM64
             platform: darwin-arm64
+            macos_arch: arm64
           - os: macos-latest
-            runner: macos-13-xlarge  # x86_64 (requires GitHub Teams/Enterprise)
+            runner: macos-14  # Cross-compile x86_64 on ARM64
             platform: darwin-amd64
+            macos_arch: x86_64
           - os: ubuntu-latest
             runner: ubuntu-latest
             platform: linux-amd64
@@ -86,6 +91,7 @@ jobs:
           BUILD_DIR="${{ runner.temp }}/build" \
           OUTPUT_DIR="${{ runner.temp }}/output" \
           CMAKE_ARCH="${{ matrix.arch || '' }}" \
+          MACOS_ARCH="${{ matrix.macos_arch || '' }}" \
           bash scripts/build-spirv-cross.sh
 
       - name: Upload artifact
@@ -102,9 +108,11 @@ jobs:
           - os: macos-latest
             runner: macos-14  # ARM64
             platform: darwin-arm64
+            macos_arch: arm64
           - os: macos-latest
-            runner: macos-13-xlarge  # x86_64 (requires GitHub Teams/Enterprise)
+            runner: macos-14  # Cross-compile x86_64 on ARM64
             platform: darwin-amd64
+            macos_arch: x86_64
           - os: ubuntu-latest
             runner: ubuntu-latest
             platform: linux-amd64
@@ -127,6 +135,7 @@ jobs:
           BUILD_DIR="${{ runner.temp }}/build" \
           OUTPUT_DIR="${{ runner.temp }}/output" \
           CMAKE_ARCH="${{ matrix.arch || '' }}" \
+          MACOS_ARCH="${{ matrix.macos_arch || '' }}" \
           bash scripts/build-dxc.sh
 
       - name: Upload artifact

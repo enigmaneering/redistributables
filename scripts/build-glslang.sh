@@ -64,14 +64,23 @@ cd glslang
 mkdir -p build
 cd build
 
-# Set up architecture for cross-compilation on Windows
+# Set up architecture for cross-compilation
 CMAKE_ARCH_FLAG=""
+CMAKE_OSX_ARCH_FLAG=""
+
+# Windows cross-compilation
 if [ -n "$CMAKE_ARCH" ]; then
     CMAKE_ARCH_FLAG="-A $CMAKE_ARCH"
 fi
 
+# macOS cross-compilation (arm64 runner can build x86_64)
+if [ -n "$MACOS_ARCH" ]; then
+    CMAKE_OSX_ARCH_FLAG="-DCMAKE_OSX_ARCHITECTURES=$MACOS_ARCH"
+fi
+
 cmake .. \
     $CMAKE_ARCH_FLAG \
+    $CMAKE_OSX_ARCH_FLAG \
     -DCMAKE_BUILD_TYPE=Release \
     -DBUILD_SHARED_LIBS=OFF \
     -DENABLE_SPVREMAPPER=OFF \

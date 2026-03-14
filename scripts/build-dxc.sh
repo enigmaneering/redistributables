@@ -54,10 +54,18 @@ fi
 mkdir -p build
 cd build
 
-# Set up architecture for cross-compilation on Windows
+# Set up architecture for cross-compilation
 CMAKE_ARCH_FLAG=""
+CMAKE_OSX_ARCH_FLAG=""
+
+# Windows cross-compilation
 if [ -n "$CMAKE_ARCH" ]; then
     CMAKE_ARCH_FLAG="-A $CMAKE_ARCH"
+fi
+
+# macOS cross-compilation (arm64 runner can build x86_64)
+if [ -n "$MACOS_ARCH" ]; then
+    CMAKE_OSX_ARCH_FLAG="-DCMAKE_OSX_ARCHITECTURES=$MACOS_ARCH"
 fi
 
 echo "Configuring DXC..."
@@ -65,6 +73,7 @@ echo "Configuring DXC..."
 # Setting to "None" avoids the default AMDGPU target that doesn't exist in DXC
 cmake .. \
     $CMAKE_ARCH_FLAG \
+    $CMAKE_OSX_ARCH_FLAG \
     -DCMAKE_BUILD_TYPE=Release \
     -DLLVM_TARGETS_TO_BUILD="None" \
     -DLLVM_INCLUDE_TESTS=OFF \
