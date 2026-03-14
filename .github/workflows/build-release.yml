@@ -116,14 +116,6 @@ jobs:
           - os: ubuntu-latest
             runner: ubuntu-latest
             platform: linux-amd64
-          - os: windows-latest
-            runner: windows-latest
-            platform: windows-amd64
-            arch: x64
-          - os: windows-latest
-            runner: windows-latest
-            platform: windows-arm64
-            arch: arm64
     runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v4
@@ -134,7 +126,6 @@ jobs:
           chmod +x scripts/build-dxc.sh
           BUILD_DIR="${{ runner.temp }}/build" \
           OUTPUT_DIR="${{ runner.temp }}/output" \
-          CMAKE_ARCH="${{ matrix.arch || '' }}" \
           MACOS_ARCH="${{ matrix.macos_arch || '' }}" \
           bash scripts/build-dxc.sh
 
@@ -144,9 +135,76 @@ jobs:
           name: dxc-${{ matrix.platform }}
           path: ${{ runner.temp }}/output/dxc-${{ matrix.platform }}.*
 
+  download-dxc-windows:
+    name: Download DXC (Windows)
+    strategy:
+      matrix:
+        include:
+          - platform: windows-amd64
+            arch: x64
+          - platform: windows-arm64
+            arch: arm64
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download Microsoft DXC Release
+        run: |
+          # Get latest DXC release from Microsoft
+          LATEST_RELEASE=$(curl -s https://api.github.com/repos/microsoft/DirectXShaderCompiler/releases/latest | grep '"tag_name"' | sed -E 's/.*"([^"]+)".*/\1/')
+          echo "Downloading DXC $LATEST_RELEASE for ${{ matrix.platform }}"
+
+          # Determine the correct binary suffix
+          if [ "${{ matrix.arch }}" = "arm64" ]; then
+            BINARY_SUFFIX="arm64"
+          else
+            BINARY_SUFFIX="x64"
+          fi
+
+          # Download the Windows release
+          DOWNLOAD_URL="https://github.com/microsoft/DirectXShaderCompiler/releases/download/${LATEST_RELEASE}/dxc_${LATEST_RELEASE}.zip"
+          curl -L -o dxc.zip "$DOWNLOAD_URL"
+
+          # Extract and repackage for our platform
+          mkdir -p output/dxc-${{ matrix.platform }}
+          unzip -q dxc.zip -d extracted
+
+          # Copy binaries and libraries
+          mkdir -p output/dxc-${{ matrix.platform }}/bin
+          mkdir -p output/dxc-${{ matrix.platform }}/lib
+          mkdir -p output/dxc-${{ matrix.platform }}/include
+
+          # Copy appropriate architecture binaries
+          if [ -d "extracted/bin/${BINARY_SUFFIX}" ]; then
+            cp -r extracted/bin/${BINARY_SUFFIX}/* output/dxc-${{ matrix.platform }}/bin/
+          else
+            # Fallback to x64 if arm64 not available
+            cp -r extracted/bin/x64/* output/dxc-${{ matrix.platform }}/bin/
+          fi
+
+          # Copy libraries
+          if [ -d "extracted/lib/${BINARY_SUFFIX}" ]; then
+            cp -r extracted/lib/${BINARY_SUFFIX}/* output/dxc-${{ matrix.platform }}/lib/
+          else
+            cp -r extracted/lib/x64/* output/dxc-${{ matrix.platform }}/lib/
+          fi
+
+          # Copy headers
+          cp -r extracted/inc/* output/dxc-${{ matrix.platform }}/include/
+
+          # Create archive
+          cd output
+          zip -r dxc-${{ matrix.platform }}.zip dxc-${{ matrix.platform }}
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: dxc-${{ matrix.platform }}
+          path: output/dxc-${{ matrix.platform }}.zip
+
   create-release:
     name: Create Release
-    needs: [build-glslang, build-spirv-cross, build-dxc]
+    needs: [build-glslang, build-spirv-cross, build-dxc, download-dxc-windows]
     runs-on: ubuntu-latest
     permissions:
       contents: write
