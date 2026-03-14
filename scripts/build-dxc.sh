@@ -54,8 +54,15 @@ fi
 mkdir -p build
 cd build
 
+# Set up architecture for cross-compilation on Windows
+CMAKE_ARCH_FLAG=""
+if [ -n "$CMAKE_ARCH" ]; then
+    CMAKE_ARCH_FLAG="-A $CMAKE_ARCH"
+fi
+
 echo "Configuring DXC..."
 cmake .. \
+    $CMAKE_ARCH_FLAG \
     -DCMAKE_BUILD_TYPE=Release \
     -DLLVM_TARGETS_TO_BUILD="host" \
     -DLLVM_INCLUDE_TESTS=OFF \

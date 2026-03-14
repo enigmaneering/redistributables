@@ -29,6 +29,11 @@ jobs:
           - os: windows-latest
             runner: windows-latest
             platform: windows-amd64
+            arch: x64
+          - os: windows-latest
+            runner: windows-latest
+            platform: windows-arm64
+            arch: arm64
     runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v4
@@ -39,6 +44,7 @@ jobs:
           chmod +x scripts/build-glslang.sh
           BUILD_DIR="${{ runner.temp }}/build" \
           OUTPUT_DIR="${{ runner.temp }}/output" \
+          CMAKE_ARCH="${{ matrix.arch || '' }}" \
           bash scripts/build-glslang.sh
 
       - name: Upload artifact
@@ -64,6 +70,11 @@ jobs:
           - os: windows-latest
             runner: windows-latest
             platform: windows-amd64
+            arch: x64
+          - os: windows-latest
+            runner: windows-latest
+            platform: windows-arm64
+            arch: arm64
     runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v4
@@ -74,6 +85,7 @@ jobs:
           chmod +x scripts/build-spirv-cross.sh
           BUILD_DIR="${{ runner.temp }}/build" \
           OUTPUT_DIR="${{ runner.temp }}/output" \
+          CMAKE_ARCH="${{ matrix.arch || '' }}" \
           bash scripts/build-spirv-cross.sh
 
       - name: Upload artifact
@@ -99,6 +111,11 @@ jobs:
           - os: windows-latest
             runner: windows-latest
             platform: windows-amd64
+            arch: x64
+          - os: windows-latest
+            runner: windows-latest
+            platform: windows-arm64
+            arch: arm64
     runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v4
@@ -109,6 +126,7 @@ jobs:
           chmod +x scripts/build-dxc.sh
           BUILD_DIR="${{ runner.temp }}/build" \
           OUTPUT_DIR="${{ runner.temp }}/output" \
+          CMAKE_ARCH="${{ matrix.arch || '' }}" \
           bash scripts/build-dxc.sh
 
       - name: Upload artifact

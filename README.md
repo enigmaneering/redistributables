@@ -17,6 +17,7 @@ Pre-built shader compilation toolchain binaries for cross-platform development.
 - macOS x86_64 (Intel)
 - Linux x86_64
 - Windows x86_64
+- Windows ARM64
 
 ## Building
 

@@ -47,7 +47,14 @@ cd spirv-cross
 mkdir -p build
 cd build
 
+# Set up architecture for cross-compilation on Windows
+CMAKE_ARCH_FLAG=""
+if [ -n "$CMAKE_ARCH" ]; then
+    CMAKE_ARCH_FLAG="-A $CMAKE_ARCH"
+fi
+
 cmake .. \
+    $CMAKE_ARCH_FLAG \
     -DCMAKE_BUILD_TYPE=Release \
     -DSPIRV_CROSS_SHARED=OFF \
     -DSPIRV_CROSS_STATIC=ON \
