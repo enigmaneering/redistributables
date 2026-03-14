@@ -92,7 +92,9 @@ cmake .. \
     -DCLANG_BUILD_TOOLS=OFF \
     -DLLVM_BUILD_UTILS=OFF \
     -DENABLE_SPIRV_CODEGEN=ON \
-    -DSPIRV_BUILD_TESTS=OFF
+    -DSPIRV_BUILD_TESTS=OFF \
+    -DLLVM_ENABLE_EH=ON \
+    -DLLVM_ENABLE_RTTI=ON
 
 echo "Building DXC (this may take 10-20 minutes)..."
 cmake --build . --config Release --target dxc -j$NCPU
