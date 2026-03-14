@@ -24,12 +24,22 @@ PLATFORM=$(echo "$PLATFORM" | sed 's/x86_64/amd64/g' | sed 's/aarch64/arm64/g')
 echo "Building DXC for $PLATFORM..."
 
 # Detect number of CPU cores
+# DXC is a huge LLVM project - limit parallelism to avoid OOM on CI runners
 if [[ "$OSTYPE" == "darwin"* ]]; then
     NCPU=$(sysctl -n hw.ncpu)
+    # Limit to half cores on macOS to avoid memory issues
+    NCPU=$((NCPU / 2))
 elif [[ "$OSTYPE" == "linux-gnu"* ]]; then
     NCPU=$(nproc)
+    # Limit to 2 cores on Linux (GitHub runners have limited memory)
+    NCPU=2
 else
-    NCPU=4
+    NCPU=2
+fi
+
+# Ensure at least 1 core
+if [ "$NCPU" -lt 1 ]; then
+    NCPU=1
 fi
 
 # Create build directory
