@@ -96,7 +96,8 @@ if [[ "$OSTYPE" == "msys" || "$OSTYPE" == "win32" || "$OSTYPE" == "cygwin" ]]; t
     if [ -n "$CROSS_COMPILE_TARGET" ] && [ "$CROSS_COMPILE_TARGET" = "aarch64" ]; then
         echo "Cross-compiling to ARM64 using Clang"
         # Use the llvm-mingw Clang which has ARM64 support
-        LLVM_MINGW_ROOT="D:/a/_temp/build/llvm-mingw-20260311-ucrt-x86_64"
+        # It's extracted in the repository root during the workflow
+        LLVM_MINGW_ROOT="${PWD}/../../llvm-mingw-20260311-ucrt-x86_64"
         CMAKE_C_COMPILER="-DCMAKE_C_COMPILER=${LLVM_MINGW_ROOT}/bin/clang.exe"
         CMAKE_CXX_COMPILER="-DCMAKE_CXX_COMPILER=${LLVM_MINGW_ROOT}/bin/clang++.exe"
         CMAKE_SYSTEM_PROCESSOR="-DCMAKE_SYSTEM_PROCESSOR=aarch64"

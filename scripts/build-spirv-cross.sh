@@ -76,7 +76,7 @@ if [[ "$OSTYPE" == "msys" || "$OSTYPE" == "win32" || "$OSTYPE" == "cygwin" ]]; t
     if [ -n "$CROSS_COMPILE_TARGET" ] && [ "$CROSS_COMPILE_TARGET" = "aarch64" ]; then
         echo "Cross-compiling to ARM64 using Clang"
         # Use clang directly - it should be in PATH after MSYS2 installation
-        LLVM_MINGW_ROOT="D:/a/_temp/build/llvm-mingw-20260311-ucrt-x86_64"
+        LLVM_MINGW_ROOT="${PWD}/../../llvm-mingw-20260311-ucrt-x86_64"
         CMAKE_C_COMPILER="-DCMAKE_C_COMPILER=${LLVM_MINGW_ROOT}/bin/clang.exe"
         CMAKE_CXX_COMPILER="-DCMAKE_CXX_COMPILER=${LLVM_MINGW_ROOT}/bin/clang++.exe"
         
