@@ -105,8 +105,9 @@ public:
 };
 
 // Undefine Windows macros that conflict with DXC's COFF.h enum definitions
-// These are defined in winnt.h but DXC needs them as enum values
+// winnt.h defines these as macros, but DXC's COFF.h needs them as enum values
 #ifdef IMAGE_FILE_MACHINE_UNKNOWN
+// Machine types
 #undef IMAGE_FILE_MACHINE_UNKNOWN
 #undef IMAGE_FILE_MACHINE_AM33
 #undef IMAGE_FILE_MACHINE_AMD64
@@ -129,6 +130,28 @@ public:
 #undef IMAGE_FILE_MACHINE_SH5
 #undef IMAGE_FILE_MACHINE_THUMB
 #undef IMAGE_FILE_MACHINE_WCEMIPSV2
+// File characteristics
+#undef IMAGE_FILE_RELOCS_STRIPPED
+#undef IMAGE_FILE_EXECUTABLE_IMAGE
+#undef IMAGE_FILE_LINE_NUMS_STRIPPED
+#undef IMAGE_FILE_LOCAL_SYMS_STRIPPED
+#undef IMAGE_FILE_LARGE_ADDRESS_AWARE
+#undef IMAGE_FILE_BYTES_REVERSED_LO
+#undef IMAGE_FILE_32BIT_MACHINE
+#undef IMAGE_FILE_DEBUG_STRIPPED
+#undef IMAGE_FILE_REMOVABLE_RUN_FROM_SWAP
+#undef IMAGE_FILE_NET_RUN_FROM_SWAP
+#undef IMAGE_FILE_SYSTEM
+#undef IMAGE_FILE_DLL
+#undef IMAGE_FILE_UP_SYSTEM_ONLY
+#undef IMAGE_FILE_BYTES_REVERSED_HI
+// Symbol values
+#undef IMAGE_SYM_DEBUG
+#undef IMAGE_SYM_ABSOLUTE
+#undef IMAGE_SYM_UNDEFINED
+// Symbol storage class
+#undef IMAGE_SYM_CLASS_END_OF_FUNCTION
+#undef IMAGE_SYM_CLASS_NULL
 #endif
 
 #endif // _ATLBASE_COMPAT_H_
