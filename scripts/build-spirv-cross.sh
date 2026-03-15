@@ -78,7 +78,7 @@ if [[ "$OSTYPE" == "msys" || "$OSTYPE" == "win32" || "$OSTYPE" == "cygwin" ]]; t
         # Use the llvm-mingw Clang which has ARM64 support
         # It's extracted in the repository root during the workflow
         # Convert to Windows path for CMake
-        LLVM_MINGW_DIR="$(cd "$(dirname "$0")/.." && pwd)/llvm-mingw-20260311-ucrt-x86_64"
+        LLVM_MINGW_DIR="$(pwd)/llvm-mingw-20260311-ucrt-x86_64"
         LLVM_MINGW_ROOT="$(cygpath -w "$LLVM_MINGW_DIR" 2>/dev/null || echo "$LLVM_MINGW_DIR")"
         CMAKE_C_COMPILER="-DCMAKE_C_COMPILER=${LLVM_MINGW_ROOT}/bin/clang.exe"
         CMAKE_CXX_COMPILER="-DCMAKE_CXX_COMPILER=${LLVM_MINGW_ROOT}/bin/clang++.exe"
