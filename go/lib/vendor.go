@@ -149,8 +149,11 @@ func detectPlatform() string {
 
 // downloadLibrary downloads and extracts a single library
 func downloadLibrary(library, platform, version, externalDir string) error {
-	// All platforms use .tar.gz
+	// Determine file extension based on library and platform
 	ext := ".tar.gz"
+	if library == "dxc" && strings.HasPrefix(platform, "windows-") {
+		ext = ".zip"
+	}
 
 	filename := fmt.Sprintf("%s-%s%s", library, platform, ext)
 	url := fmt.Sprintf("https://github.com/%s/releases/download/%s/%s", githubRepo, version, filename)
