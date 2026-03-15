@@ -61,6 +61,17 @@ jobs:
             git
             make
 
+      - name: Download ARM64 MinGW runtime libraries
+        if: matrix.cross_compile_target == 'aarch64'
+        shell: msys2 {0}
+        run: |
+          # Download llvm-mingw which has ARM64 runtime libraries
+          curl -L -o llvm-mingw.tar.xz https://github.com/mstorsjo/llvm-mingw/releases/download/20240619/llvm-mingw-20240619-ucrt-x86_64.tar.xz
+          tar -xf llvm-mingw.tar.xz
+          # Copy ARM64 libraries to a location where the linker can find them
+          mkdir -p /mingw64/aarch64-w64-mingw32
+          cp -r llvm-mingw-20240619-ucrt-x86_64/aarch64-w64-mingw32/* /mingw64/aarch64-w64-mingw32/
+
       - name: Build glslang (Windows)
         if: matrix.mingw_arch
         shell: msys2 {0}
@@ -139,6 +150,17 @@ jobs:
             mingw-w64-${{ matrix.mingw_arch }}-lld
             git
             make
+
+      - name: Download ARM64 MinGW runtime libraries
+        if: matrix.cross_compile_target == 'aarch64'
+        shell: msys2 {0}
+        run: |
+          # Download llvm-mingw which has ARM64 runtime libraries
+          curl -L -o llvm-mingw.tar.xz https://github.com/mstorsjo/llvm-mingw/releases/download/20240619/llvm-mingw-20240619-ucrt-x86_64.tar.xz
+          tar -xf llvm-mingw.tar.xz
+          # Copy ARM64 libraries to a location where the linker can find them
+          mkdir -p /mingw64/aarch64-w64-mingw32
+          cp -r llvm-mingw-20240619-ucrt-x86_64/aarch64-w64-mingw32/* /mingw64/aarch64-w64-mingw32/
 
       - name: Build SPIRV-Cross (Windows)
         if: matrix.mingw_arch
