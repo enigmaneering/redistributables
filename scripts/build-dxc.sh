@@ -141,14 +141,14 @@ if [[ "$OSTYPE" == "msys" || "$OSTYPE" == "win32" || "$OSTYPE" == "cygwin" ]]; t
         # Include sysroot for Windows headers and libraries (use Unix path for MSYS2)
         # Use Windows-style path with forward slashes for sysroot - convert using cygpath -m
         SYSROOT_WIN="$(cygpath -m "$LLVM_MINGW_ABS")"
-        # DXC's MSFileSystem needs windows.h but doesn't include it with MinGW
-        export CFLAGS="--target=aarch64-w64-mingw32 --sysroot=${SYSROOT_WIN} -include windows.h -fcf-protection=none"
-        export CXXFLAGS="--target=aarch64-w64-mingw32 --sysroot=${SYSROOT_WIN} -include windows.h -fcf-protection=none"
+        # DXC's MSFileSystem needs windows.h and ATL compatibility but doesn't include it with MinGW
+        export CFLAGS="--target=aarch64-w64-mingw32 --sysroot=${SYSROOT_WIN} ${ATL_COMPAT_INCLUDE} -include windows.h -include strsafe.h -fcf-protection=none"
+        export CXXFLAGS="--target=aarch64-w64-mingw32 --sysroot=${SYSROOT_WIN} ${ATL_COMPAT_INCLUDE} -include windows.h -include strsafe.h -include atlbase.h -fcf-protection=none"
         export LDFLAGS="--sysroot=${SYSROOT_WIN}"
     else
-        # AMD64 MinGW builds also need windows.h for DXC's MSFileSystem
-        export CFLAGS="-include windows.h -fcf-protection=none"
-        export CXXFLAGS="-include windows.h -fcf-protection=none"
+        # AMD64 MinGW builds also need windows.h and ATL compatibility for DXC's MSFileSystem
+        export CFLAGS="${ATL_COMPAT_INCLUDE} -include windows.h -include strsafe.h -fcf-protection=none"
+        export CXXFLAGS="${ATL_COMPAT_INCLUDE} -include windows.h -include strsafe.h -include atlbase.h -fcf-protection=none"
     fi
 fi
 
