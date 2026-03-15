@@ -15,7 +15,7 @@ import (
 
 const (
 	githubRepo    = "enigmaneering/external"
-	defaultVersion = "v0.042"
+	defaultVersion = "v0.0.42"
 )
 
 // GetExternalDir returns the path where external libraries should be installed
