@@ -83,12 +83,9 @@ cd build
 CMAKE_ARCH_FLAG=""
 CMAKE_OSX_ARCH_FLAG=""
 CMAKE_SYSTEM_PROCESSOR=""
-CMAKE_C_FLAGS=""
 CMAKE_LINKER=""
-CMAKE_CXX_FLAGS=""
 CMAKE_C_COMPILER=""
 CMAKE_CXX_COMPILER=""
-CMAKE_EXE_LINKER_FLAGS=""
 CMAKE_SHARED_LINKER_FLAGS=""
 
 # macOS cross-compilation (arm64 runner can build x86_64)
@@ -106,15 +103,16 @@ if [[ "$OSTYPE" == "msys" || "$OSTYPE" == "win32" || "$OSTYPE" == "cygwin" ]]; t
     if [ -n "$CROSS_COMPILE_TARGET" ] && [ "$CROSS_COMPILE_TARGET" = "aarch64" ]; then
         echo "Cross-compiling to ARM64 using Clang"
         # Use clang directly - it should be in PATH after MSYS2 installation
-        
+
         CMAKE_C_COMPILER="-DCMAKE_C_COMPILER=/mingw64/bin/clang.exe"
         CMAKE_CXX_COMPILER="-DCMAKE_CXX_COMPILER=/mingw64/bin/clang++.exe"
         CMAKE_LINKER="-DCMAKE_LINKER=/mingw64/bin/ld.lld.exe"
         CMAKE_SYSTEM_PROCESSOR="-DCMAKE_SYSTEM_PROCESSOR=aarch64"
-        CMAKE_C_FLAGS="-DCMAKE_C_FLAGS=\"--target=aarch64-w64-mingw32 --sysroot=/mingw64/aarch64-w64-mingw32\""
-        CMAKE_CXX_FLAGS="-DCMAKE_CXX_FLAGS=\"--target=aarch64-w64-mingw32 --sysroot=/mingw64/aarch64-w64-mingw32\""
-        CMAKE_EXE_LINKER_FLAGS="-DCMAKE_EXE_LINKER_FLAGS=\"-fuse-ld=lld -L/mingw64/aarch64-w64-mingw32/lib\""
         CMAKE_SHARED_LINKER_FLAGS="-DCMAKE_SHARED_LINKER_FLAGS=-fuse-ld=lld"
+        # Set flags as environment variables to avoid shell quoting issues
+        export CFLAGS="--target=aarch64-w64-mingw32 --sysroot=/mingw64/aarch64-w64-mingw32"
+        export CXXFLAGS="--target=aarch64-w64-mingw32 --sysroot=/mingw64/aarch64-w64-mingw32"
+        export LDFLAGS="-fuse-ld=lld -L/mingw64/aarch64-w64-mingw32/lib"
     fi
 fi
 
@@ -138,9 +136,6 @@ cmake .. \
     $CMAKE_C_COMPILER \
     $CMAKE_CXX_COMPILER \
     $CMAKE_LINKER \
-    $CMAKE_C_FLAGS \
-    $CMAKE_CXX_FLAGS \
-    $CMAKE_EXE_LINKER_FLAGS \
     $CMAKE_SHARED_LINKER_FLAGS \
     -DCMAKE_BUILD_TYPE=Release \
     -DENABLE_SPIRV_CODEGEN=ON \
