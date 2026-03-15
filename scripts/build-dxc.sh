@@ -150,10 +150,11 @@ fi
 echo "Configuring DXC..."
 
 # For ARM64 cross-compilation, override CMAKE_C/CXX_FLAGS to remove cf-protection
+# Use CMAKE_C_FLAGS instead of CMAKE_C_FLAGS_RELEASE for higher precedence
 # Use semicolons as CMake list separators
 if [ -n "$CROSS_COMPILE_TARGET" ] && [ "$CROSS_COMPILE_TARGET" = "aarch64" ]; then
-    CMAKE_C_FLAGS_OVERRIDE="-DCMAKE_C_FLAGS_RELEASE=-O2;-DNDEBUG"
-    CMAKE_CXX_FLAGS_OVERRIDE="-DCMAKE_CXX_FLAGS_RELEASE=-O2;-DNDEBUG;-std=gnu++17"
+    CMAKE_C_FLAGS_OVERRIDE="-DCMAKE_C_FLAGS=-O2;-DNDEBUG"
+    CMAKE_CXX_FLAGS_OVERRIDE="-DCMAKE_CXX_FLAGS=-O2;-DNDEBUG;-std=gnu++17"
 else
     CMAKE_C_FLAGS_OVERRIDE=""
     CMAKE_CXX_FLAGS_OVERRIDE=""
