@@ -173,7 +173,7 @@ if [ -n "$CROSS_COMPILE_TARGET" ] && [ "$CROSS_COMPILE_TARGET" = "aarch64" ]; th
         $CMAKE_LINKER \
         $CMAKE_SHARED_LINKER_FLAGS \
         "-DCMAKE_C_FLAGS=-O2 -DNDEBUG -include windows.h -include strsafe.h -Wno-unused-command-line-argument -Qunused-arguments" \
-        "-DCMAKE_CXX_FLAGS=-O2 -DNDEBUG -std=gnu++17 -include windows.h -include atlbase.h -include strsafe.h -Wno-unused-command-line-argument -Wno-invalid-specialization -Qunused-arguments" \
+        "-DCMAKE_CXX_FLAGS=-O2 -DNDEBUG -std=gnu++17 -include windows.h -include strsafe.h -DATL_NO_VTABLE= -Wno-unused-command-line-argument -Wno-invalid-specialization -Qunused-arguments" \
         -DCMAKE_C_FLAGS_RELEASE="" \
         -DCMAKE_CXX_FLAGS_RELEASE="" \
         -DLLVM_ENABLE_EH=ON \
