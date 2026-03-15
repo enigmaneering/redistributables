@@ -2,3 +2,7 @@ build/
 output/
 *.tar.gz
 *.zip
+
+# Version freeze file - prevents automatic updates
+# Users can create this to lock their external library versions
+freeze

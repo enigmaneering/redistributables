@@ -59,24 +59,53 @@ func getLatestVersion() (string, error) {
 }
 
 // EnsureLibraries downloads and extracts all external libraries if not present
-// Automatically uses the latest release version
+// Automatically uses the latest release version and re-downloads if a newer version is available
+// If a 'freeze' file exists in the external directory, automatic updates are disabled
 func EnsureLibraries() error {
+	externalDir := GetExternalDir()
+
+	// Check if frozen - if so, only install if nothing is present
+	if isFrozen(externalDir) {
+		installedVersion, err := getInstalledVersion(externalDir)
+		if err == nil && installedVersion != "" {
+			fmt.Printf("External libraries frozen at version %s\n", installedVersion)
+			fmt.Printf("(Remove 'freeze' file in external directory to enable automatic updates)\n")
+			return nil
+		}
+		// Frozen but nothing installed - still need initial install
+		fmt.Printf("External libraries frozen, but nothing installed yet\n")
+		fmt.Printf("Please manually download a release or remove 'freeze' file\n")
+		return fmt.Errorf("frozen external directory with no libraries installed")
+	}
+
 	version, err := getLatestVersion()
 	if err != nil {
 		return fmt.Errorf("failed to determine latest version: %w", err)
 	}
-	fmt.Printf("Using latest release: %s\n", version)
+
+	// Check if we already have this version installed
+	installedVersion, err := getInstalledVersion(externalDir)
+	if err == nil && installedVersion == version {
+		fmt.Printf("External libraries already up-to-date (%s)\n", version)
+		return nil
+	}
+
+	if installedVersion != "" {
+		fmt.Printf("Upgrading external libraries: %s → %s\n", installedVersion, version)
+		// Clean out old version
+		if err := cleanExternalDir(externalDir); err != nil {
+			return fmt.Errorf("failed to clean external directory: %w", err)
+		}
+	} else {
+		fmt.Printf("Installing external libraries: %s\n", version)
+	}
+
 	return EnsureLibrariesVersion(version)
 }
 
 // EnsureLibrariesVersion downloads and extracts external libraries for a specific version
 func EnsureLibrariesVersion(version string) error {
 	externalDir := GetExternalDir()
-
-	// Check if already installed
-	if isInstalled(externalDir) {
-		return nil
-	}
 
 	platform := detectPlatform()
 	if platform == "" {
@@ -95,6 +124,11 @@ func EnsureLibrariesVersion(version string) error {
 	if err := downloadLicenseFiles(version, externalDir); err != nil {
 		fmt.Printf("Warning: Could not download license files: %v\n", err)
 		fmt.Printf("This is expected for older releases. License files are available in the repository.\n")
+	}
+
+	// Write version file to track what's installed
+	if err := writeVersionFile(externalDir, version); err != nil {
+		fmt.Printf("Warning: Could not write version file: %v\n", err)
 	}
 
 	return nil
@@ -337,6 +371,42 @@ func downloadLicenseFiles(version, externalDir string) error {
 	fmt.Printf("Successfully downloaded README.md\n")
 
 	return nil
+}
+
+// getInstalledVersion reads the version file to determine what's currently installed
+func getInstalledVersion(externalDir string) (string, error) {
+	versionFile := filepath.Join(externalDir, ".version")
+	data, err := os.ReadFile(versionFile)
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(data)), nil
+}
+
+// writeVersionFile writes the current version to a file for future checks
+func writeVersionFile(externalDir, version string) error {
+	versionFile := filepath.Join(externalDir, ".version")
+	return os.WriteFile(versionFile, []byte(version+"\n"), 0644)
+}
+
+// cleanExternalDir removes all library directories to prepare for new installation
+func cleanExternalDir(externalDir string) error {
+	dirsToClean := []string{"glslang", "spirv-cross", "dxc"}
+	for _, dir := range dirsToClean {
+		libDir := filepath.Join(externalDir, dir)
+		if err := os.RemoveAll(libDir); err != nil && !os.IsNotExist(err) {
+			return fmt.Errorf("failed to remove %s: %w", libDir, err)
+		}
+	}
+	return nil
+}
+
+// isFrozen checks if a 'freeze' file exists in the external directory
+// If present, automatic updates are disabled
+func isFrozen(externalDir string) bool {
+	freezeFile := filepath.Join(externalDir, "freeze")
+	_, err := os.Stat(freezeFile)
+	return err == nil
 }
 
 // extractZip extracts a .zip file and renames the root directory
