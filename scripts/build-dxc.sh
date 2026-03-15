@@ -109,8 +109,8 @@ if [[ "$OSTYPE" == "msys" || "$OSTYPE" == "win32" || "$OSTYPE" == "cygwin" ]]; t
         CMAKE_C_COMPILER="-DCMAKE_C_COMPILER=${CLANG_PATH}"
         CMAKE_CXX_COMPILER="-DCMAKE_CXX_COMPILER=${CLANGXX_PATH}"
         CMAKE_SYSTEM_PROCESSOR="-DCMAKE_SYSTEM_PROCESSOR=aarch64"
-        CMAKE_C_FLAGS="-DCMAKE_C_FLAGS=--target=aarch64-w64-mingw32 -fuse-ld=lld"
-        CMAKE_CXX_FLAGS="-DCMAKE_CXX_FLAGS=--target=aarch64-w64-mingw32 -fuse-ld=lld"
+        CMAKE_C_FLAGS="-DCMAKE_C_FLAGS=--target=aarch64-w64-mingw32"
+        CMAKE_CXX_FLAGS="-DCMAKE_CXX_FLAGS=--target=aarch64-w64-mingw32"
         CMAKE_EXE_LINKER_FLAGS="-DCMAKE_EXE_LINKER_FLAGS=-fuse-ld=lld"
         CMAKE_SHARED_LINKER_FLAGS="-DCMAKE_SHARED_LINKER_FLAGS=-fuse-ld=lld"
     fi
