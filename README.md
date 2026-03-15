@@ -20,6 +20,23 @@ Pre-built shader compilation toolchain binaries for cross-platform development.
 - Windows x86_64
 - Windows ARM64
 
+### Windows Build Notes
+
+Windows releases (both AMD64 and ARM64) are built using MinGW toolchains rather than Microsoft Visual C++ (MSVC):
+
+- **AMD64**: Built with MSYS2/MinGW64
+- **ARM64**: Cross-compiled using llvm-mingw on AMD64 runners
+
+**Guaranteed Components**:
+- ✅ `dxc.exe` - DirectX Shader Compiler executable (HLSL to SPIRV/DXIL)
+- ✅ `glslangValidator.exe` - GLSL to SPIRV compiler
+- ✅ `spirv-cross.exe` - SPIRV transpiler
+
+**Known Limitations**:
+- Some DXC support libraries may not be included due to ATL (Active Template Library) dependencies
+- Only core compiler executables are tested and guaranteed to work
+- For full DXC functionality, consider using official Microsoft builds compiled with MSVC
+
 ## Building
 
 Builds are automated via GitHub Actions. To create a new release:
