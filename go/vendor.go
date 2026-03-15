@@ -54,6 +54,11 @@ func EnsureLibrariesVersion(version string) error {
 		}
 	}
 
+	// Download LICENSE and README files
+	if err := downloadLicenseFiles(version, externalDir); err != nil {
+		return fmt.Errorf("failed to download license files: %w", err)
+	}
+
 	return nil
 }
 
@@ -204,6 +209,42 @@ func extractTarGz(archivePath, destDir string) error {
 			}
 			outFile.Close()
 		}
+	}
+
+	return nil
+}
+
+// downloadLicenseFiles downloads LICENSE and README from the vendor repo
+func downloadLicenseFiles(version, externalDir string) error {
+	files := []string{"LICENSES.md", "README.md"}
+
+	for _, filename := range files {
+		url := fmt.Sprintf("https://raw.githubusercontent.com/%s/%s/%s", githubRepo, version, filename)
+		destPath := filepath.Join(externalDir, filename)
+
+		fmt.Printf("Downloading %s...\n", filename)
+
+		resp, err := http.Get(url)
+		if err != nil {
+			return fmt.Errorf("failed to download %s: %w", filename, err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK {
+			return fmt.Errorf("download %s failed with status: %s", filename, resp.Status)
+		}
+
+		outFile, err := os.Create(destPath)
+		if err != nil {
+			return fmt.Errorf("failed to create %s: %w", filename, err)
+		}
+		defer outFile.Close()
+
+		if _, err := io.Copy(outFile, resp.Body); err != nil {
+			return fmt.Errorf("failed to write %s: %w", filename, err)
+		}
+
+		fmt.Printf("Successfully downloaded %s\n", filename)
 	}
 
 	return nil
