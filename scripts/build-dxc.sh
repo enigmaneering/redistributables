@@ -126,7 +126,9 @@ cmake .. \
     -DLLVM_INCLUDE_EXAMPLES=OFF \
     -DLLVM_TARGETS_TO_BUILD="" \
     -DHLSL_ENABLE_ANALYZE=OFF \
-    -DHLSL_BUILD_DXILCONV=OFF
+    -DHLSL_BUILD_DXILCONV=OFF \
+    -DHLSL_INCLUDE_TESTS=OFF \
+    -DCLANG_INCLUDE_TESTS=OFF
 
 echo "Building DXC (this may take 10-20 minutes)..."
 # Building dxc automatically builds dxcompiler as a dependency

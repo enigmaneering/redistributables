@@ -37,7 +37,7 @@ jobs:
             platform: windows-amd64
             mingw_arch: x86_64
           - os: windows-latest
-            runner: windows-11-arm64
+            runner: windows-11-arm
             platform: windows-arm64
             mingw_arch: aarch64
     runs-on: ${{ matrix.runner }}
@@ -108,7 +108,7 @@ jobs:
             platform: windows-amd64
             mingw_arch: x86_64
           - os: windows-latest
-            runner: windows-11-arm64
+            runner: windows-11-arm
             platform: windows-arm64
             mingw_arch: aarch64
     runs-on: ${{ matrix.runner }}
@@ -175,7 +175,7 @@ jobs:
             platform: windows-amd64
             mingw_arch: x86_64
           - os: windows-latest
-            runner: windows-11-arm64
+            runner: windows-11-arm
             platform: windows-arm64
             mingw_arch: aarch64
     runs-on: ${{ matrix.runner }}
