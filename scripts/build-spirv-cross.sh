@@ -8,15 +8,15 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BUILD_DIR="${BUILD_DIR:-$SCRIPT_DIR/../build}"
 OUTPUT_DIR="${OUTPUT_DIR:-$SCRIPT_DIR/../output}"
 
-# Query GitHub for latest release if not specified
+# Query GitHub for latest vulkan-sdk tag if not specified
 if [ -z "$SPIRV_CROSS_VERSION" ]; then
-    echo "Querying GitHub for latest SPIRV-Cross release..."
-    SPIRV_CROSS_VERSION=$(curl -s https://api.github.com/repos/KhronosGroup/SPIRV-Cross/releases/latest | grep '"tag_name"' | sed -E 's/.*"tag_name": "([^"]+)".*/\1/')
+    echo "Querying GitHub for latest SPIRV-Cross Vulkan SDK tag..."
+    SPIRV_CROSS_VERSION=$(curl -s https://api.github.com/repos/KhronosGroup/SPIRV-Cross/tags | grep '"name"' | grep 'vulkan-sdk-' | head -1 | sed -E 's/.*"name": "([^"]+)".*/\1/')
     if [ -z "$SPIRV_CROSS_VERSION" ]; then
         echo "Error: Could not determine latest SPIRV-Cross version, falling back to main"
         SPIRV_CROSS_VERSION="main"
     else
-        echo "Latest release: $SPIRV_CROSS_VERSION"
+        echo "Latest Vulkan SDK tag: $SPIRV_CROSS_VERSION"
     fi
 fi
 
