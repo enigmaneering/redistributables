@@ -104,15 +104,16 @@ if [[ "$OSTYPE" == "msys" || "$OSTYPE" == "win32" || "$OSTYPE" == "cygwin" ]]; t
         echo "Cross-compiling to ARM64 using Clang"
         # Use clang directly - it should be in PATH after MSYS2 installation
 
-        CMAKE_C_COMPILER="-DCMAKE_C_COMPILER=/mingw64/bin/clang.exe"
-        CMAKE_CXX_COMPILER="-DCMAKE_CXX_COMPILER=/mingw64/bin/clang++.exe"
-        CMAKE_LINKER="-DCMAKE_LINKER=/mingw64/bin/ld.lld.exe"
+        LLVM_MINGW_ROOT="D:/a/_temp/build/llvm-mingw-20260311-ucrt-x86_64"
+        CMAKE_C_COMPILER="-DCMAKE_C_COMPILER=${LLVM_MINGW_ROOT}/bin/clang.exe"
+        CMAKE_CXX_COMPILER="-DCMAKE_CXX_COMPILER=${LLVM_MINGW_ROOT}/bin/clang++.exe"
+        
         CMAKE_SYSTEM_PROCESSOR="-DCMAKE_SYSTEM_PROCESSOR=aarch64"
         CMAKE_SHARED_LINKER_FLAGS="-DCMAKE_SHARED_LINKER_FLAGS=-fuse-ld=lld"
         # Set flags as environment variables to avoid shell quoting issues
         export CFLAGS="--target=aarch64-w64-mingw32"
-        export CXXFLAGS="--target=aarch64-w64-mingw32 -stdlib=libc++"
-        export LDFLAGS="-fuse-ld=lld --sysroot=D:/a/_temp/msys64/mingw64/aarch64-w64-mingw32 -stdlib=libc++ -rtlib=compiler-rt"
+        export CXXFLAGS="--target=aarch64-w64-mingw32"
+        export LDFLAGS=""
     fi
 fi
 
