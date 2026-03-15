@@ -115,6 +115,8 @@ fi
 
 echo "Configuring DXC..."
 # Use cache file first, then override with our flags
+# Note: DXC builds libdxcompiler as a shared library by default
+# We keep BUILD_SHARED_LIBS=OFF but also build the dylib target
 cmake .. \
     -C ../cmake/caches/PredefinedParams.cmake \
     $CMAKE_ARCH_FLAG \
@@ -123,10 +125,6 @@ cmake .. \
     $CMAKE_C_COMPILER \
     $CMAKE_CXX_COMPILER \
     -DCMAKE_BUILD_TYPE=Release \
-    -DBUILD_SHARED_LIBS=OFF \
-    -DLLVM_BUILD_STATIC=ON \
-    -DLLVM_LINK_LLVM_DYLIB=OFF \
-    -DCLANG_LINK_CLANG_DYLIB=OFF \
     -DENABLE_SPIRV_CODEGEN=ON \
     -DSPIRV_BUILD_TESTS=OFF \
     -DCLANG_ENABLE_ARCMT=OFF \
@@ -137,34 +135,44 @@ cmake .. \
     -DHLSL_ENABLE_ANALYZE=OFF \
     -DHLSL_BUILD_DXILCONV=OFF
 
-echo "Building DXC (this may take 10-20 minutes)..."
+echo "Building DXC and libdxcompiler (this may take 10-20 minutes)..."
+# Build both dxc binary and libdxcompiler shared library
 cmake --build . --config Release --target dxc -j$NCPU
+cmake --build . --config Release --target libdxcompiler -j$NCPU
 
 # Package output
 PACKAGE_DIR="$OUTPUT_DIR/dxc-$PLATFORM"
 mkdir -p "$PACKAGE_DIR/bin"
+mkdir -p "$PACKAGE_DIR/lib"
 
-# Copy DXC binary
+# Copy DXC binary and libraries
 echo "Packaging DXC..."
 if [[ "$OSTYPE" == "msys" || "$OSTYPE" == "win32" || "$OSTYPE" == "cygwin" ]]; then
     cp bin/Release/dxc.exe "$PACKAGE_DIR/bin/"
+    # Copy DLLs to bin (Windows convention)
+    find bin/Release -name "dxcompiler.dll" -exec cp {} "$PACKAGE_DIR/bin/" \; 2>/dev/null || true
+    find bin/Release -name "*.dll" -exec cp {} "$PACKAGE_DIR/bin/" \; 2>/dev/null || true
 else
     cp bin/dxc "$PACKAGE_DIR/bin/"
-fi
+    # Copy shared libraries to lib directory
+    find lib -name "libdxcompiler.so*" -exec cp {} "$PACKAGE_DIR/lib/" \; 2>/dev/null || true
+    find lib -name "libdxcompiler.dylib" -exec cp {} "$PACKAGE_DIR/lib/" \; 2>/dev/null || true
 
-# Verify binary is properly statically linked
-echo "Verifying DXC binary..."
-if [[ "$OSTYPE" == "darwin"* ]]; then
-    echo "DXC dependencies:"
-    otool -L "$PACKAGE_DIR/bin/dxc"
-    # Warn if it has unexpected dynamic dependencies
-    if otool -L "$PACKAGE_DIR/bin/dxc" | grep -q "libdxcompiler.dylib"; then
-        echo "WARNING: DXC binary has unexpected dynamic dependency on libdxcompiler.dylib"
-        echo "This should be statically linked with BUILD_SHARED_LIBS=OFF"
+    # On macOS, update rpath in dxc binary to find dylib in ../lib
+    if [[ "$OSTYPE" == "darwin"* ]]; then
+        echo "Fixing rpath for macOS..."
+        # Change @rpath to @executable_path/../lib
+        install_name_tool -change @rpath/libdxcompiler.dylib @executable_path/../lib/libdxcompiler.dylib "$PACKAGE_DIR/bin/dxc" 2>/dev/null || true
+
+        echo "DXC dependencies after rpath fix:"
+        otool -L "$PACKAGE_DIR/bin/dxc"
     fi
-elif [[ "$OSTYPE" == "linux-gnu"* ]]; then
-    echo "DXC dependencies:"
-    ldd "$PACKAGE_DIR/bin/dxc" || true
+
+    # On Linux, verify library was copied
+    if [[ "$OSTYPE" == "linux-gnu"* ]]; then
+        echo "DXC dependencies:"
+        ldd "$PACKAGE_DIR/bin/dxc" || true
+    fi
 fi
 
 # Create archive
