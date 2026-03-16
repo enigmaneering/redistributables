@@ -1,4 +1,4 @@
-name: Build and Release Vendor Tools
+name: Build and Release Redistributables
 
 on:
   push:
@@ -14,8 +14,6 @@ jobs:
       contents: write  # Need write permission to create and push tags
     outputs:
       version: ${{ steps.version.outputs.version }}
-      gpu_version: ${{ steps.version.outputs.gpu_version }}
-      gpu_version_number: ${{ steps.version.outputs.gpu_version_number }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -58,20 +56,6 @@ jobs:
             # Create main release tag (vX.Y.Z)
             git tag $VERSION
             git push origin $VERSION
-
-            # Also create go/fetch module tag with v1.0.x scheme
-            # Map v0.0.45 -> go/fetch/v1.0.1, v0.0.46 -> v1.0.2, etc.
-            GPU_PATCH=$((PATCH - 44))  # v0.0.45 becomes patch 1 (v1.0.1), v0.0.44 becomes 0 (v1.0.0)
-            if [ "$GPU_PATCH" -lt 0 ]; then
-              GPU_PATCH=0
-            fi
-            GPU_VERSION="go/fetch/v1.0.${GPU_PATCH}"
-            GPU_VERSION_NUMBER="v1.0.${GPU_PATCH}"
-            git tag $GPU_VERSION
-            git push origin $GPU_VERSION
-            echo "Created module tag: $GPU_VERSION"
-            echo "gpu_version=$GPU_VERSION" >> $GITHUB_OUTPUT
-            echo "gpu_version_number=$GPU_VERSION_NUMBER" >> $GITHUB_OUTPUT
           else
             # Tag push - use the tag name
             VERSION="${GITHUB_REF#refs/tags/}"
@@ -486,75 +470,6 @@ jobs:
             output/dxc-${{ matrix.platform }}.tar.gz
             output/dxc-${{ matrix.platform }}.zip
 
-  build-fetch:
-    needs: [determine-version]
-    name: Build fetch CLI
-    strategy:
-      fail-fast: true
-      matrix:
-        include:
-          - os: macos-latest
-            runner: macos-14
-            platform: darwin-arm64
-            goos: darwin
-            goarch: arm64
-          - os: macos-latest
-            runner: macos-14
-            platform: darwin-amd64
-            goos: darwin
-            goarch: amd64
-          - os: ubuntu-latest
-            runner: ubuntu-latest
-            platform: linux-amd64
-            goos: linux
-            goarch: amd64
-          - os: ubuntu-latest
-            runner: ubuntu-24.04-arm
-            platform: linux-arm64
-            goos: linux
-            goarch: arm64
-          - os: windows-latest
-            runner: windows-latest
-            platform: windows-amd64
-            goos: windows
-            goarch: amd64
-          - os: windows-latest
-            runner: windows-latest
-            platform: windows-arm64
-            goos: windows
-            goarch: arm64
-    runs-on: ${{ matrix.runner }}
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Setup Go
-        uses: actions/setup-go@v5
-        with:
-          go-version: '1.23'
-          cache: false
-
-      - name: Build fetch (Unix)
-        if: runner.os != 'Windows'
-        run: |
-          cd go/fetch
-          GOOS=${{ matrix.goos }} GOARCH=${{ matrix.goarch }} go build -o fetch-${{ matrix.platform }}
-
-      - name: Build fetch (Windows)
-        if: runner.os == 'Windows'
-        run: |
-          cd go/fetch
-          $env:GOOS="${{ matrix.goos }}"
-          $env:GOARCH="${{ matrix.goarch }}"
-          go build -o fetch-${{ matrix.platform }}.exe
-
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: fetch-${{ matrix.platform }}
-          path: |
-            go/fetch/fetch-${{ matrix.platform }}
-            go/fetch/fetch-${{ matrix.platform }}.exe
-
   build-naga:
     needs: [determine-version]
     name: Build Naga
@@ -725,129 +640,3 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-  create-fetch-release:
-    name: Create go/fetch Release
-    needs: [determine-version, build-fetch]
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Download fetch artifacts
-        uses: actions/download-artifact@v4
-        with:
-          path: artifacts
-          pattern: 'fetch-*'
-
-      - name: Display artifact structure
-        run: ls -R artifacts
-
-      - name: Create go/fetch Release
-        uses: softprops/action-gh-release@v1
-        with:
-          tag_name: ${{ needs.determine-version.outputs.gpu_version }}
-          name: fetch cli ${{ needs.determine-version.outputs.gpu_version_number }}
-          draft: false
-          prerelease: false
-          files: |
-            artifacts/**/fetch-*
-          body: |
-            # go/fetch ${{ needs.determine-version.outputs.gpu_version }}
-
-            CLI tool and Go module that downloads and extracts the enigmaneering redistributable binaries.
-
-            By default, fetches the latest redistributables. View [all redistributable releases](https://github.com/enigmaneering/external/releases?q=redistributables) to see available versions.
-
-            ## 🚀 Quick Start
-
-            ### Using the fetch CLI
-
-            Run the `fetch` binary to download the shader toolchain binaries:
-
-            ```bash
-            # macOS ARM64 (Apple Silicon)
-            curl -L -o fetch https://github.com/enigmaneering/external/releases/download/${{ needs.determine-version.outputs.gpu_version }}/fetch-darwin-arm64
-            chmod +x fetch
-            ./fetch
-
-            # macOS x86_64 (Intel)
-            curl -L -o fetch https://github.com/enigmaneering/external/releases/download/${{ needs.determine-version.outputs.gpu_version }}/fetch-darwin-amd64
-            chmod +x fetch
-            ./fetch
-
-            # Linux x86_64
-            curl -L -o fetch https://github.com/enigmaneering/external/releases/download/${{ needs.determine-version.outputs.gpu_version }}/fetch-linux-amd64
-            chmod +x fetch
-            ./fetch
-
-            # Linux ARM64
-            curl -L -o fetch https://github.com/enigmaneering/external/releases/download/${{ needs.determine-version.outputs.gpu_version }}/fetch-linux-arm64
-            chmod +x fetch
-            ./fetch
-
-            # Windows x86_64 (PowerShell)
-            Invoke-WebRequest -Uri "https://github.com/enigmaneering/external/releases/download/${{ needs.determine-version.outputs.gpu_version }}/fetch-windows-amd64.exe" -OutFile "fetch.exe"
-            .\fetch.exe
-
-            # Windows ARM64 (PowerShell)
-            Invoke-WebRequest -Uri "https://github.com/enigmaneering/external/releases/download/${{ needs.determine-version.outputs.gpu_version }}/fetch-windows-arm64.exe" -OutFile "fetch.exe"
-            .\fetch.exe
-            ```
-
-            ### Using the Go Module
-
-            ```go
-            import "github.com/enigmaneering/external/go/fetch/gpu"
-
-            func main() {
-                // Downloads and extracts latest toolchain to ./external/
-                if err := gpu.EnsureLibraries(); err != nil {
-                    log.Fatal(err)
-                }
-
-                // Specify a version and custom directory
-                os.Setenv("ENIGMATIC_GOFETCH_DIRECTORY", "./my-shaders")
-                if err := gpu.EnsureLibrariesVersion("${{ needs.determine-version.outputs.version }}"); err != nil {
-                    log.Fatal(err)
-                }
-            }
-            ```
-
-            Install:
-            ```bash
-            go get github.com/enigmaneering/external/go/fetch@${{ needs.determine-version.outputs.gpu_version }}
-            ```
-
-            ## 📦 Downloads
-
-            This fetches [${{ needs.determine-version.outputs.version }}](https://github.com/enigmaneering/external/releases/tag/${{ needs.determine-version.outputs.version }}) containing:
-
-            - **glslang** - GLSL/ESSL → SPIRV compiler
-            - **SPIRV-Cross** - SPIRV → GLSL/HLSL/MSL/WGSL transpiler
-            - **DXC** - HLSL → SPIRV/DXIL compiler
-            - **Naga** - WGSL/GLSL/SPIRV multi-format compiler
-
-            ## 💻 Platforms
-
-            - macOS ARM64, x86_64
-            - Linux ARM64, x86_64
-            - Windows ARM64, x86_64
-
-            ## 🔄 Features
-
-            - Automatic version detection and upgrades
-            - Create `FREEZE` file to pin version
-            - Version tracking via `.version` file
-            - Custom directory via `ENIGMATIC_GOFETCH_DIRECTORY`
-
-            ## 📝 CLI Usage
-
-            ```bash
-            fetch                     # Download latest
-            fetch --version v0.0.45   # Download specific version
-            fetch --dir ./shaders     # Custom output directory
-            fetch --help              # Show help
-            ```
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
