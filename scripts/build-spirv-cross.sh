@@ -64,6 +64,14 @@ if [ ! -d "spirv-cross" ]; then
     git clone --depth 1 --branch "$SPIRV_CROSS_VERSION" https://github.com/KhronosGroup/SPIRV-Cross.git spirv-cross
 fi
 
+# Verify license exists before building (fail fast)
+echo "Verifying license file..."
+if [ ! -f "spirv-cross/LICENSE" ]; then
+    echo "Error: LICENSE not found in SPIRV-Cross repository"
+    exit 1
+fi
+echo "License file verified"
+
 # Build SPIRV-Cross
 cd spirv-cross
 mkdir -p build
@@ -163,9 +171,7 @@ done
 # Copy license
 echo "Packaging license..."
 cd "$BUILD_DIR/spirv-cross"
-if [ -f "LICENSE" ]; then
-    cp "LICENSE" "$PACKAGE_DIR/LICENSE"
-fi
+cp "LICENSE" "$PACKAGE_DIR/LICENSE"
 
 # Create archive
 cd "$OUTPUT_DIR"

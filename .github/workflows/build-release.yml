@@ -299,19 +299,27 @@ jobs:
           DOWNLOAD_URL="https://github.com/microsoft/DirectXShaderCompiler/releases/download/$RELEASE_TAG/$ASSET_NAME"
           echo "Downloading DXC for ${{ matrix.platform }} from GitHub"
 
+          # Download and verify license before downloading large binary (fail fast)
+          echo "Downloading DXC license..."
+          curl -L -o LICENSE.TXT \
+            "https://raw.githubusercontent.com/microsoft/DirectXShaderCompiler/$RELEASE_TAG/LICENSE.TXT" || \
+          curl -L -o LICENSE.TXT \
+            "https://raw.githubusercontent.com/microsoft/DirectXShaderCompiler/main/LICENSE.TXT"
+
+          if [ ! -f LICENSE.TXT ]; then
+            echo "Error: Failed to download LICENSE"
+            exit 1
+          fi
+          echo "License verified"
+
           curl -L -o dxc.tar.gz "$DOWNLOAD_URL"
 
           # Extract and repackage
           mkdir -p output/dxc-${{ matrix.platform }}
           tar -xzf dxc.tar.gz -C output/dxc-${{ matrix.platform }}
 
-          # Download license from DXC repo
-          echo "Downloading DXC license..."
-          mkdir -p output/dxc-${{ matrix.platform }}/LICENSES
-          curl -L -o output/dxc-${{ matrix.platform }}/LICENSE \
-            "https://raw.githubusercontent.com/microsoft/DirectXShaderCompiler/$RELEASE_TAG/LICENSE.TXT" || \
-          curl -L -o output/dxc-${{ matrix.platform }}/LICENSE \
-            "https://raw.githubusercontent.com/microsoft/DirectXShaderCompiler/main/LICENSE.TXT"
+          # Copy license
+          cp LICENSE.TXT output/dxc-${{ matrix.platform }}/LICENSE
 
           # Create archive
           cd output
@@ -341,6 +349,22 @@ jobs:
           # NuGet packages are zip files
           Expand-Archive -Path "dxc.nupkg" -DestinationPath "nuget-extract"
 
+          # Verify license exists before copying binaries (fail fast)
+          Write-Host "Verifying license..."
+          $licenseExists = $false
+          if (Test-Path "nuget-extract/LICENSE.txt") {
+            $licenseExists = $true
+          } elseif (Test-Path "nuget-extract/LICENSE.TXT") {
+            $licenseExists = $true
+          } elseif (Test-Path "nuget-extract/LICENSE") {
+            $licenseExists = $true
+          }
+          if (-not $licenseExists) {
+            Write-Error "Error: LICENSE not found in NuGet package"
+            exit 1
+          }
+          Write-Host "License verified"
+
           # Create output directory
           New-Item -ItemType Directory -Force -Path "output/dxc-$platform"
 
@@ -349,12 +373,11 @@ jobs:
 
           # Copy license from NuGet package
           Write-Host "Copying license..."
-          New-Item -ItemType Directory -Force -Path "output/dxc-$platform/LICENSES"
           if (Test-Path "nuget-extract/LICENSE.txt") {
             Copy-Item -Path "nuget-extract/LICENSE.txt" -Destination "output/dxc-$platform/LICENSE"
           } elseif (Test-Path "nuget-extract/LICENSE.TXT") {
             Copy-Item -Path "nuget-extract/LICENSE.TXT" -Destination "output/dxc-$platform/LICENSE"
-          } elseif (Test-Path "nuget-extract/LICENSE") {
+          } else {
             Copy-Item -Path "nuget-extract/LICENSE" -Destination "output/dxc-$platform/LICENSE"
           }
 

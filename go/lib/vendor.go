@@ -60,7 +60,7 @@ func getLatestVersion() (string, error) {
 
 // EnsureLibraries downloads and extracts all external libraries if not present
 // Automatically uses the latest release version and re-downloads if a newer version is available
-// If a 'freeze' file exists in the external directory, automatic updates are disabled
+// If a 'FREEZE' file exists in the external directory, automatic updates are disabled
 func EnsureLibraries() error {
 	externalDir := GetExternalDir()
 
@@ -69,12 +69,12 @@ func EnsureLibraries() error {
 		installedVersion, err := getInstalledVersion(externalDir)
 		if err == nil && installedVersion != "" {
 			fmt.Printf("External libraries frozen at version %s\n", installedVersion)
-			fmt.Printf("(Remove 'freeze' file in external directory to enable automatic updates)\n")
+			fmt.Printf("(Remove 'FREEZE' file in external directory to enable automatic updates)\n")
 			return nil
 		}
 		// Frozen but nothing installed - still need initial install
 		fmt.Printf("External libraries frozen, but nothing installed yet\n")
-		fmt.Printf("Please manually download a release or remove 'freeze' file\n")
+		fmt.Printf("Please manually download a release or remove 'FREEZE' file\n")
 		return fmt.Errorf("frozen external directory with no libraries installed")
 	}
 
@@ -317,10 +317,10 @@ func cleanExternalDir(externalDir string) error {
 	return nil
 }
 
-// isFrozen checks if a 'freeze' file exists in the external directory
+// isFrozen checks if a 'FREEZE' file exists in the external directory
 // If present, automatic updates are disabled
 func isFrozen(externalDir string) bool {
-	freezeFile := filepath.Join(externalDir, "freeze")
+	freezeFile := filepath.Join(externalDir, "FREEZE")
 	_, err := os.Stat(freezeFile)
 	return err == nil
 }

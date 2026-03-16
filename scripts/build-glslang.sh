@@ -81,6 +81,14 @@ mkdir -p glslang/External
 rm -rf glslang/External/spirv-tools
 ln -sf ../../spirv-tools glslang/External/spirv-tools
 
+# Verify license exists before building (fail fast)
+echo "Verifying license file..."
+if [ ! -f "glslang/LICENSE.txt" ]; then
+    echo "Error: LICENSE.txt not found in glslang repository"
+    exit 1
+fi
+echo "License file verified"
+
 # Build glslang
 cd glslang
 mkdir -p build
@@ -185,17 +193,7 @@ done
 # Copy license
 echo "Packaging license..."
 cd "$BUILD_DIR/glslang"
-if [ -f "LICENSE.txt" ]; then
-    cp "LICENSE.txt" "$PACKAGE_DIR/LICENSE"
-fi
-# SPIRV-Tools license
-if [ -f "External/spirv-tools/LICENSE" ]; then
-    cp "External/spirv-tools/LICENSE" "$PACKAGE_DIR/LICENSES/SPIRV-Tools.LICENSE"
-fi
-# SPIRV-Headers license
-if [ -f "External/spirv-tools/external/spirv-headers/LICENSE" ]; then
-    cp "External/spirv-tools/external/spirv-headers/LICENSE" "$PACKAGE_DIR/LICENSES/SPIRV-Headers.LICENSE"
-fi
+cp "LICENSE.txt" "$PACKAGE_DIR/LICENSE"
 
 # Create archive
 cd "$OUTPUT_DIR"

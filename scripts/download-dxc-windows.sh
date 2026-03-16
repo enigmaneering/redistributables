@@ -58,6 +58,14 @@ curl -L -o "$PACKAGE_FILE" "$NUGET_URL"
 echo "Extracting package..."
 unzip -q "$PACKAGE_FILE"
 
+# Verify license exists before copying binaries (fail fast)
+echo "Verifying license file..."
+if [ ! -f "LICENSE.txt" ] && [ ! -f "LICENSE.TXT" ] && [ ! -f "LICENSE" ]; then
+    echo "Error: LICENSE not found in NuGet package"
+    exit 1
+fi
+echo "License file verified"
+
 # Copy binaries to output directory
 # NuGet package structure: bin/{x64,arm64}/{dxc.exe,dxcompiler.dll,dxil.dll}
 NUGET_BIN_DIR="bin/$ARCH"
@@ -78,11 +86,12 @@ cp "$NUGET_BIN_DIR/dxil.dll" "$OUTPUT_DIR/$PLATFORM/"
 
 # Copy license from NuGet package
 echo "Copying license..."
+# License was already verified to exist
 if [ -f "LICENSE.txt" ]; then
     cp "LICENSE.txt" "$OUTPUT_DIR/$PLATFORM/LICENSE"
 elif [ -f "LICENSE.TXT" ]; then
     cp "LICENSE.TXT" "$OUTPUT_DIR/$PLATFORM/LICENSE"
-elif [ -f "LICENSE" ]; then
+else
     cp "LICENSE" "$OUTPUT_DIR/$PLATFORM/LICENSE"
 fi
 

@@ -69,6 +69,14 @@ if [ ! -f "external/SPIRV-Headers/README.md" ]; then
     GIT_TERMINAL_PROMPT=0 git submodule update --init --recursive --depth 1
 fi
 
+# Verify license exists before building (fail fast)
+echo "Verifying license file..."
+if [ ! -f "LICENSE.TXT" ] && [ ! -f "LICENSE.txt" ] && [ ! -f "LICENSE" ]; then
+    echo "Error: LICENSE not found in DXC repository"
+    exit 1
+fi
+echo "License file verified"
+
 # Patch CMakeLists.txt files for newer CMake compatibility
 echo "Patching CMakeLists.txt files for newer CMake compatibility..."
 sed -i.bak '/cmake_policy(SET CMP0051 OLD)/d' CMakeLists.txt
@@ -276,11 +284,12 @@ fi
 # Copy license
 echo "Packaging license..."
 cd "$BUILD_DIR/dxc"
+# License was already verified to exist before build
 if [ -f "LICENSE.TXT" ]; then
     cp "LICENSE.TXT" "$PACKAGE_DIR/LICENSE"
 elif [ -f "LICENSE.txt" ]; then
     cp "LICENSE.txt" "$PACKAGE_DIR/LICENSE"
-elif [ -f "LICENSE" ]; then
+else
     cp "LICENSE" "$PACKAGE_DIR/LICENSE"
 fi
 

@@ -47,18 +47,18 @@ To prevent automatic updates and stay on your current version:
 
 ```bash
 # In your project root
-touch external/freeze
+touch external/FREEZE
 ```
 
 When frozen, you'll see:
 ```
 External libraries frozen at version v0.0.42
-(Remove 'freeze' file in external directory to enable automatic updates)
+(Remove 'FREEZE' file in external directory to enable automatic updates)
 ```
 
 To re-enable automatic updates:
 ```bash
-rm external/freeze
+rm external/FREEZE
 ```
 
 ### Manual Version Selection
@@ -76,13 +76,10 @@ These binaries are built specifically for your platform:
 
 ## Licenses
 
-Full license texts are available in the `LICENSES/` subdirectory:
-- `LICENSES/glslang.LICENSE`
-- `LICENSES/SPIRV-Tools.LICENSE`
-- `LICENSES/SPIRV-Headers.LICENSE`
-- `LICENSES/SPIRV-Cross.LICENSE`
-- `LICENSES/DXC.LICENSE`
-- `LICENSES/README.md` - License summary
+Each tool includes its full license text at the root of its directory:
+- `glslang/LICENSE` - glslang and dependencies (BSD-3-Clause / Apache-2.0)
+- `spirv-cross/LICENSE` - SPIRV-Cross (Apache-2.0)
+- `dxc/LICENSE` - DirectX Shader Compiler (University of Illinois/NCSA)
 
 All licenses permit redistribution of precompiled binaries.
 
@@ -104,8 +101,8 @@ If you're getting "library not found" errors:
 ### Wrong version
 To force a re-download:
 ```bash
-# Remove freeze if present
-rm external/freeze
+# Remove FREEZE if present
+rm external/FREEZE
 
 # Clean external libraries
 rm -rf external/glslang external/spirv-cross external/dxc external/.version
@@ -115,7 +112,7 @@ make
 ```
 
 ### Disable automatic updates
-Create a `freeze` file as described above in the "Freezing Versions" section.
+Create a `FREEZE` file as described above in the "Freezing Versions" section.
 
 ## More Information
 
