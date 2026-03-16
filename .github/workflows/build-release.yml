@@ -10,6 +10,8 @@ jobs:
   determine-version:
     name: Determine Version
     runs-on: ubuntu-latest
+    permissions:
+      contents: write  # Need write permission to create and push tags
     outputs:
       version: ${{ steps.version.outputs.version }}
     steps:
