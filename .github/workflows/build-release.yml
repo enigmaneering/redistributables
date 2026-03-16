@@ -757,7 +757,7 @@ jobs:
 
             CLI tool and Go module that downloads and extracts the enigmaneering redistributable binaries.
 
-            This version fetches [redistributables ${{ needs.determine-version.outputs.version }}](https://github.com/enigmaneering/external/releases/tag/${{ needs.determine-version.outputs.version }}). View [all redistributable releases](https://github.com/enigmaneering/external/releases?q=redistributables) to see available versions.
+            By default, fetches the latest redistributables. View [all redistributable releases](https://github.com/enigmaneering/external/releases?q=redistributables) to see available versions.
 
             ## 🚀 Quick Start
 
