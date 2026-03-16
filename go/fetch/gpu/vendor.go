@@ -1,6 +1,7 @@
 package gpu
 
 import (
+	_ "embed"
 	"archive/tar"
 	"archive/zip"
 	"compress/gzip"
@@ -13,6 +14,9 @@ import (
 	"runtime"
 	"strings"
 )
+
+//go:embed ../README-deploy.md
+var readmeContent string
 
 const (
 	githubRepo = "enigmaneering/external"
@@ -118,6 +122,11 @@ func EnsureLibrariesVersion(version string) error {
 		if err := downloadLibrary(lib, platform, version, externalDir); err != nil {
 			return fmt.Errorf("failed to download %s: %w", lib, err)
 		}
+	}
+
+	// Deploy embedded README-deploy.md as README.md
+	if err := deployReadme(externalDir); err != nil {
+		fmt.Printf("Warning: Could not install README: %v\n", err)
 	}
 
 	// Write version file to track what's installed
@@ -324,6 +333,19 @@ func isFrozen(externalDir string) bool {
 	freezeFile := filepath.Join(externalDir, "FREEZE")
 	_, err := os.Stat(freezeFile)
 	return err == nil
+}
+
+// deployReadme writes the embedded README-deploy.md as README.md in the external directory
+func deployReadme(externalDir string) error {
+	fmt.Printf("Installing README...\n")
+
+	readmePath := filepath.Join(externalDir, "README.md")
+	if err := os.WriteFile(readmePath, []byte(readmeContent), 0644); err != nil {
+		return fmt.Errorf("failed to write README: %w", err)
+	}
+
+	fmt.Printf("Successfully installed README\n")
+	return nil
 }
 
 // extractZip extracts a .zip file and renames the root directory

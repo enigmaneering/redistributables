@@ -646,17 +646,24 @@ jobs:
             artifacts/**/*.zip
             artifacts/**/fetch-*
           body: |
-            # Shader Compilation Toolchain Release ${{ needs.determine-version.outputs.version }}
+            # Shader Compilation Toolchain ${{ needs.determine-version.outputs.version }}
 
-            Pre-built shader compilation toolchain binaries and fetch CLI tool for all platforms.
+            Complete cross-platform shader compilation toolchain with support for GLSL, HLSL, WGSL, and SPIRV. This release includes pre-built binaries for all supported platforms plus the `fetch` CLI tool for automated installation.
 
-            ## Quick Start with fetch CLI
+            ## 🚀 Quick Start
 
-            Download the `fetch` binary for your platform:
+            ### Using the fetch CLI (Recommended)
+
+            Download and run `fetch` to automatically install the toolchain:
 
             ```bash
-            # macOS ARM64
+            # macOS ARM64 (Apple Silicon)
             curl -L -o fetch https://github.com/enigmaneering/external/releases/download/${{ needs.determine-version.outputs.version }}/fetch-darwin-arm64
+            chmod +x fetch
+            ./fetch
+
+            # macOS x86_64 (Intel)
+            curl -L -o fetch https://github.com/enigmaneering/external/releases/download/${{ needs.determine-version.outputs.version }}/fetch-darwin-amd64
             chmod +x fetch
             ./fetch
 
@@ -665,44 +672,81 @@ jobs:
             chmod +x fetch
             ./fetch
 
+            # Linux ARM64
+            curl -L -o fetch https://github.com/enigmaneering/external/releases/download/${{ needs.determine-version.outputs.version }}/fetch-linux-arm64
+            chmod +x fetch
+            ./fetch
+
             # Windows x86_64 (PowerShell)
             Invoke-WebRequest -Uri "https://github.com/enigmaneering/external/releases/download/${{ needs.determine-version.outputs.version }}/fetch-windows-amd64.exe" -OutFile "fetch.exe"
             .\fetch.exe
+
+            # Windows ARM64 (PowerShell)
+            Invoke-WebRequest -Uri "https://github.com/enigmaneering/external/releases/download/${{ needs.determine-version.outputs.version }}/fetch-windows-arm64.exe" -OutFile "fetch.exe"
+            .\fetch.exe
             ```
 
-            ## Included Tools
+            ### Using Go Module
 
-            - **glslang** - GLSL to SPIRV compiler with optimizer
-            - **SPIRV-Cross** - SPIRV transpiler (GLSL/HLSL/MSL/WGSL)
-            - **DXC** - DirectX Shader Compiler (HLSL to SPIRV/DXIL)
-            - **Naga** - WebGPU shader compiler (WGSL to SPIRV)
-            - **fetch** - CLI tool to download and manage toolchain
-
-            ## Supported Platforms
-
-            - macOS ARM64 (Apple Silicon)
-            - macOS x86_64 (Intel)
-            - Linux x86_64
-            - Linux ARM64
-            - Windows x86_64
-            - Windows ARM64
-
-            ## Manual Download
-
-            Download the appropriate archives for your platform and extract to your project's `external/` directory.
-
-            ## Go Module
-
-            Use the `fetch` package programmatically:
+            Automatically download and manage the toolchain from your Go application:
 
             ```go
             import "github.com/enigmaneering/external/go/fetch/gpu"
 
             func main() {
+                // Downloads latest toolchain to ./external/
                 if err := gpu.EnsureLibraries(); err != nil {
+                    log.Fatal(err)
+                }
+
+                // Or specify a version and custom directory
+                os.Setenv("EXTERNAL_DIR", "./my-shaders")
+                if err := gpu.EnsureLibrariesVersion("${{ needs.determine-version.outputs.version }}"); err != nil {
                     log.Fatal(err)
                 }
             }
             ```
+
+            ## 🛠️ Included Tools
+
+            | Tool | Description | Capabilities |
+            |------|-------------|--------------|
+            | **glslang** | Reference GLSL/ESSL validator and compiler | GLSL/ESSL → SPIRV, with SPIRV optimizer |
+            | **SPIRV-Cross** | SPIRV reflection and transpiler | SPIRV → GLSL/HLSL/MSL/WGSL |
+            | **DXC** | DirectX Shader Compiler | HLSL → SPIRV/DXIL, WGSL support |
+            | **Naga** | Rust-based WebGPU shader compiler | WGSL/GLSL/SPIRV ↔ SPIRV/WGSL/MSL/HLSL/GLSL |
+            | **fetch** | Toolchain installation CLI | Automatic binary download and version management |
+
+            ## 💻 Supported Platforms
+
+            All binaries are provided for the following platforms:
+
+            - ✅ macOS ARM64 (Apple Silicon M1/M2/M3/M4)
+            - ✅ macOS x86_64 (Intel)
+            - ✅ Linux x86_64 (glibc 2.31+)
+            - ✅ Linux ARM64 (glibc 2.31+)
+            - ✅ Windows x86_64
+            - ✅ Windows ARM64
+
+            ## 📦 Manual Installation
+
+            If you prefer manual installation, download the appropriate `.tar.gz` (Unix) or `.zip` (Windows) archives for your platform and extract them to your project's `external/` directory.
+
+            Each tool is packaged separately:
+            - `glslang-{platform}.tar.gz` / `.zip`
+            - `spirv-cross-{platform}.tar.gz` / `.zip`
+            - `dxc-{platform}.tar.gz` / `.zip`
+            - `naga-{platform}.tar.gz` / `.zip`
+
+            ## 🔄 Version Management
+
+            The toolchain includes automatic version tracking:
+            - **`.version`** file tracks the installed version
+            - **`FREEZE`** file prevents automatic updates (create manually to pin version)
+            - Automatic upgrade detection when using `fetch` or Go module
+
+            ## 📝 License
+
+            All tools maintain their original licenses. See individual tool directories for license information.
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
