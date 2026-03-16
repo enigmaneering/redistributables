@@ -14,6 +14,7 @@ jobs:
       contents: write  # Need write permission to create and push tags
     outputs:
       version: ${{ steps.version.outputs.version }}
+      gpu_version: ${{ steps.version.outputs.gpu_version }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -57,16 +58,17 @@ jobs:
             git tag $VERSION
             git push origin $VERSION
 
-            # Also create go/fetch/gpu module tag with v1.0.x scheme
-            # Map v0.0.45 -> go/fetch/gpu/v1.0.0, v0.0.46 -> v1.0.1, etc.
+            # Also create go/fetch module tag with v1.0.x scheme
+            # Map v0.0.45 -> go/fetch/v1.0.1, v0.0.46 -> v1.0.2, etc.
             GPU_PATCH=$((PATCH - 44))  # v0.0.45 becomes patch 1 (v1.0.1), v0.0.44 becomes 0 (v1.0.0)
             if [ "$GPU_PATCH" -lt 0 ]; then
               GPU_PATCH=0
             fi
-            GPU_VERSION="go/fetch/gpu/v1.0.${GPU_PATCH}"
+            GPU_VERSION="go/fetch/v1.0.${GPU_PATCH}"
             git tag $GPU_VERSION
             git push origin $GPU_VERSION
             echo "Created module tag: $GPU_VERSION"
+            echo "gpu_version=$GPU_VERSION" >> $GITHUB_OUTPUT
           else
             # Tag push - use the tag name
             VERSION="${GITHUB_REF#refs/tags/}"
@@ -619,77 +621,178 @@ jobs:
           path: ${{ runner.temp }}/output/naga-${{ matrix.platform }}.*
 
   create-release:
-    name: Create Release
-    needs: [determine-version, build-glslang, build-spirv-cross, build-dxc, download-dxc-prebuilt, build-naga, build-fetch]
+    name: Create Shader Binaries Release
+    needs: [determine-version, build-glslang, build-spirv-cross, build-dxc, download-dxc-prebuilt, build-naga]
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
       - uses: actions/checkout@v4
 
-      - name: Download all artifacts
+      - name: Download shader binary artifacts
         uses: actions/download-artifact@v4
         with:
           path: artifacts
+          pattern: '{glslang,spirv-cross,dxc,naga}-*'
 
       - name: Display artifact structure
         run: ls -R artifacts
 
-      - name: Create Release
+      - name: Create Shader Binaries Release
         uses: softprops/action-gh-release@v1
         with:
           tag_name: ${{ needs.determine-version.outputs.version }}
-          name: Release ${{ needs.determine-version.outputs.version }}
+          name: Shader Compilation Toolchain ${{ needs.determine-version.outputs.version }}
           draft: false
           prerelease: false
           files: |
             artifacts/**/*.tar.gz
             artifacts/**/*.zip
-            artifacts/**/fetch-*
           body: |
             # Shader Compilation Toolchain ${{ needs.determine-version.outputs.version }}
 
-            Complete cross-platform shader compilation toolchain with support for GLSL, HLSL, WGSL, and SPIRV. This release includes pre-built binaries for all supported platforms plus the `fetch` CLI tool for automated installation.
+            Complete cross-platform shader compilation toolchain with support for GLSL, HLSL, WGSL, and SPIRV. Pre-built binaries for all supported platforms.
 
             ## 🚀 Quick Start
 
-            ### Using the fetch CLI (Recommended)
+            ### Automated Installation (Recommended)
 
-            Download and run `fetch` to automatically install the toolchain:
+            Use the [`fetch` CLI tool](https://github.com/enigmaneering/external/releases/tag/${{ needs.determine-version.outputs.gpu_version }}) or [Go module](https://github.com/enigmaneering/external/tree/main/go/fetch) for automatic installation:
+
+            ```bash
+            # Download fetch CLI from the go/fetch release
+            # See: https://github.com/enigmaneering/external/releases/tag/${{ needs.determine-version.outputs.gpu_version }}
+
+            ./fetch  # Automatically downloads and installs this version
+            ```
+
+            Or use the Go module:
+
+            ```go
+            import "github.com/enigmaneering/external/go/fetch/gpu"
+
+            func main() {
+                // Automatically downloads latest toolchain to ./external/
+                if err := gpu.EnsureLibraries(); err != nil {
+                    log.Fatal(err)
+                }
+            }
+            ```
+
+            ## 🛠️ Included Tools
+
+            | Tool | Description | Capabilities |
+            |------|-------------|--------------|
+            | **glslang** | Reference GLSL/ESSL validator and compiler | GLSL/ESSL → SPIRV, with SPIRV optimizer |
+            | **SPIRV-Cross** | SPIRV reflection and transpiler | SPIRV → GLSL/HLSL/MSL/WGSL |
+            | **DXC** | DirectX Shader Compiler | HLSL → SPIRV/DXIL, WGSL support |
+            | **Naga** | Rust-based WebGPU shader compiler | WGSL/GLSL/SPIRV ↔ SPIRV/WGSL/MSL/HLSL/GLSL |
+
+            ## 💻 Supported Platforms
+
+            All binaries are provided for the following platforms:
+
+            - ✅ macOS ARM64 (Apple Silicon M1/M2/M3/M4)
+            - ✅ macOS x86_64 (Intel)
+            - ✅ Linux x86_64 (glibc 2.31+)
+            - ✅ Linux ARM64 (glibc 2.31+)
+            - ✅ Windows x86_64
+            - ✅ Windows ARM64
+
+            ## 📦 Manual Installation
+
+            Download the appropriate `.tar.gz` (Unix) or `.zip` (Windows) archives for your platform and extract them to your project's `external/` directory.
+
+            Each tool is packaged separately:
+            - `glslang-{platform}.tar.gz` / `.zip`
+            - `spirv-cross-{platform}.tar.gz` / `.zip`
+            - `dxc-{platform}.tar.gz` / `.zip`
+            - `naga-{platform}.tar.gz` / `.zip`
+
+            ## 🔄 Version Management
+
+            When using the fetch tool or Go module:
+            - **`.version`** file tracks the installed version
+            - **`FREEZE`** file prevents automatic updates (create manually to pin version)
+            - Automatic upgrade detection
+
+            ## 📝 License
+
+            All tools maintain their original licenses. See individual tool directories for license information.
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  create-fetch-release:
+    name: Create go/fetch Release
+    needs: [determine-version, build-fetch]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download fetch artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          pattern: 'fetch-*'
+
+      - name: Display artifact structure
+        run: ls -R artifacts
+
+      - name: Create go/fetch Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ needs.determine-version.outputs.gpu_version }}
+          name: go/fetch ${{ needs.determine-version.outputs.gpu_version }}
+          draft: false
+          prerelease: false
+          files: |
+            artifacts/**/fetch-*
+          body: |
+            # go/fetch - Shader Toolchain Installer ${{ needs.determine-version.outputs.gpu_version }}
+
+            Automated installer and Go module for managing the [shader compilation toolchain](https://github.com/enigmaneering/external/releases/tag/${{ needs.determine-version.outputs.version }}).
+
+            ## 🚀 Quick Start
+
+            ### Using the fetch CLI
+
+            Download the `fetch` binary for your platform and run it to automatically install the shader toolchain:
 
             ```bash
             # macOS ARM64 (Apple Silicon)
-            curl -L -o fetch https://github.com/enigmaneering/external/releases/download/${{ needs.determine-version.outputs.version }}/fetch-darwin-arm64
+            curl -L -o fetch https://github.com/enigmaneering/external/releases/download/${{ needs.determine-version.outputs.gpu_version }}/fetch-darwin-arm64
             chmod +x fetch
             ./fetch
 
             # macOS x86_64 (Intel)
-            curl -L -o fetch https://github.com/enigmaneering/external/releases/download/${{ needs.determine-version.outputs.version }}/fetch-darwin-amd64
+            curl -L -o fetch https://github.com/enigmaneering/external/releases/download/${{ needs.determine-version.outputs.gpu_version }}/fetch-darwin-amd64
             chmod +x fetch
             ./fetch
 
             # Linux x86_64
-            curl -L -o fetch https://github.com/enigmaneering/external/releases/download/${{ needs.determine-version.outputs.version }}/fetch-linux-amd64
+            curl -L -o fetch https://github.com/enigmaneering/external/releases/download/${{ needs.determine-version.outputs.gpu_version }}/fetch-linux-amd64
             chmod +x fetch
             ./fetch
 
             # Linux ARM64
-            curl -L -o fetch https://github.com/enigmaneering/external/releases/download/${{ needs.determine-version.outputs.version }}/fetch-linux-arm64
+            curl -L -o fetch https://github.com/enigmaneering/external/releases/download/${{ needs.determine-version.outputs.gpu_version }}/fetch-linux-arm64
             chmod +x fetch
             ./fetch
 
             # Windows x86_64 (PowerShell)
-            Invoke-WebRequest -Uri "https://github.com/enigmaneering/external/releases/download/${{ needs.determine-version.outputs.version }}/fetch-windows-amd64.exe" -OutFile "fetch.exe"
+            Invoke-WebRequest -Uri "https://github.com/enigmaneering/external/releases/download/${{ needs.determine-version.outputs.gpu_version }}/fetch-windows-amd64.exe" -OutFile "fetch.exe"
             .\fetch.exe
 
             # Windows ARM64 (PowerShell)
-            Invoke-WebRequest -Uri "https://github.com/enigmaneering/external/releases/download/${{ needs.determine-version.outputs.version }}/fetch-windows-arm64.exe" -OutFile "fetch.exe"
+            Invoke-WebRequest -Uri "https://github.com/enigmaneering/external/releases/download/${{ needs.determine-version.outputs.gpu_version }}/fetch-windows-arm64.exe" -OutFile "fetch.exe"
             .\fetch.exe
             ```
 
-            ### Using Go Module
+            ### Using the Go Module
 
-            Automatically download and manage the toolchain from your Go application:
+            Add automatic toolchain management to your Go application:
 
             ```go
             import "github.com/enigmaneering/external/go/fetch/gpu"
@@ -708,46 +811,45 @@ jobs:
             }
             ```
 
-            ## 🛠️ Included Tools
+            Install the module:
 
-            | Tool | Description | Capabilities |
-            |------|-------------|--------------|
-            | **glslang** | Reference GLSL/ESSL validator and compiler | GLSL/ESSL → SPIRV, with SPIRV optimizer |
-            | **SPIRV-Cross** | SPIRV reflection and transpiler | SPIRV → GLSL/HLSL/MSL/WGSL |
-            | **DXC** | DirectX Shader Compiler | HLSL → SPIRV/DXIL, WGSL support |
-            | **Naga** | Rust-based WebGPU shader compiler | WGSL/GLSL/SPIRV ↔ SPIRV/WGSL/MSL/HLSL/GLSL |
-            | **fetch** | Toolchain installation CLI | Automatic binary download and version management |
+            ```bash
+            go get github.com/enigmaneering/external/go/fetch@${{ needs.determine-version.outputs.gpu_version }}
+            ```
+
+            ## 📦 What Gets Installed
+
+            This version of fetch installs shader toolchain version [${{ needs.determine-version.outputs.version }}](https://github.com/enigmaneering/external/releases/tag/${{ needs.determine-version.outputs.version }}):
+
+            - **glslang** - GLSL/ESSL → SPIRV compiler with optimizer
+            - **SPIRV-Cross** - SPIRV → GLSL/HLSL/MSL/WGSL transpiler
+            - **DXC** - DirectX Shader Compiler (HLSL → SPIRV/DXIL, WGSL support)
+            - **Naga** - WebGPU shader compiler (WGSL/GLSL/SPIRV multi-format support)
 
             ## 💻 Supported Platforms
 
-            All binaries are provided for the following platforms:
-
-            - ✅ macOS ARM64 (Apple Silicon M1/M2/M3/M4)
+            - ✅ macOS ARM64 (Apple Silicon)
             - ✅ macOS x86_64 (Intel)
-            - ✅ Linux x86_64 (glibc 2.31+)
-            - ✅ Linux ARM64 (glibc 2.31+)
+            - ✅ Linux x86_64
+            - ✅ Linux ARM64
             - ✅ Windows x86_64
             - ✅ Windows ARM64
 
-            ## 📦 Manual Installation
-
-            If you prefer manual installation, download the appropriate `.tar.gz` (Unix) or `.zip` (Windows) archives for your platform and extract them to your project's `external/` directory.
-
-            Each tool is packaged separately:
-            - `glslang-{platform}.tar.gz` / `.zip`
-            - `spirv-cross-{platform}.tar.gz` / `.zip`
-            - `dxc-{platform}.tar.gz` / `.zip`
-            - `naga-{platform}.tar.gz` / `.zip`
-
             ## 🔄 Version Management
 
-            The toolchain includes automatic version tracking:
-            - **`.version`** file tracks the installed version
-            - **`FREEZE`** file prevents automatic updates (create manually to pin version)
-            - Automatic upgrade detection when using `fetch` or Go module
+            The fetch tool includes intelligent version management:
+            - Automatic detection of installed toolchain version
+            - Upgrade to latest version when available
+            - Create a `FREEZE` file in the external directory to pin the current version
+            - Version tracking via `.version` file
 
-            ## 📝 License
+            ## 📝 CLI Options
 
-            All tools maintain their original licenses. See individual tool directories for license information.
+            ```bash
+            fetch --help              # Show help
+            fetch                     # Install latest version
+            fetch --version v0.0.45   # Install specific version
+            fetch --dir ./shaders     # Install to custom directory
+            ```
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
