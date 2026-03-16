@@ -15,7 +15,7 @@ import (
 	"strings"
 )
 
-//go:embed README-deploy.md
+//go:embed README-gpu.md
 var readmeContent string
 
 const (
