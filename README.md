@@ -46,7 +46,7 @@ This repository features a fully automated release pipeline:
 Use the Go library for automatic download and version management:
 
 ```go
-import external "git.enigmaneering.org/enigmaneering/redistributables/go/fetch/gpu"
+import external "git.enigmaneering.org/redistributables/go/fetch/gpu"
 
 func main() {
     // Automatically downloads latest release

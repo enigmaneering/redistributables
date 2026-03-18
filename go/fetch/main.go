@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"os"
 
-	"git.enigmaneering.org/enigmaneering/redistributables/go/fetch/gpu"
+	"git.enigmaneering.org/redistributables/go/fetch/gpu"
 )
 
 func main() {
