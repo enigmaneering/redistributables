@@ -545,14 +545,6 @@ jobs:
       fail-fast: true
       matrix:
         include:
-          - os: macos-latest
-            runner: macos-14  # ARM64
-            platform: darwin-arm64
-            macos_arch: arm64
-          - os: macos-latest
-            runner: macos-14  # Cross-compile x86_64 on ARM64
-            platform: darwin-amd64
-            macos_arch: x86_64
           - os: ubuntu-latest
             runner: ubuntu-latest
             platform: linux-amd64
@@ -563,24 +555,17 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install LLVM (Linux)
-        if: runner.os == 'Linux'
+      - name: Install LLVM
         run: |
           sudo apt-get update
           sudo apt-get install -y llvm-dev clang libclang-dev cmake pkg-config libhwloc-dev ocl-icd-opencl-dev
 
-      - name: Install LLVM (macOS)
-        if: runner.os == 'macOS'
-        run: |
-          brew install llvm cmake pkg-config hwloc
-
-      - name: Build POCL (macOS/Linux)
+      - name: Build POCL
         shell: bash
         run: |
           chmod +x scripts/build-pocl.sh
           BUILD_DIR="${{ runner.temp }}/build" \
           OUTPUT_DIR="${{ runner.temp }}/output" \
-          MACOS_ARCH="${{ matrix.macos_arch || '' }}" \
           bash scripts/build-pocl.sh
 
       - name: Upload artifact
