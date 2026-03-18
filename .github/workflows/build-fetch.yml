@@ -118,7 +118,7 @@ jobs:
 
             CLI tool and Go module that downloads and extracts the enigmaneering redistributable binaries.
 
-            By default, fetches the latest redistributables. View [all redistributable releases](https://git.enigmaneering.org/enigmaneering/external/releases?q=redistributables) to see available versions.
+            By default, fetches the latest redistributables. View [all redistributable releases](https://git.enigmaneering.org/enigmaneering/redistributables/releases?q=redistributables) to see available versions.
 
             ## 🚀 Quick Start
 
@@ -128,38 +128,38 @@ jobs:
 
             ```bash
             # macOS ARM64 (Apple Silicon)
-            curl -L -o fetch https://git.enigmaneering.org/enigmaneering/external/releases/download/go/fetch/${{ inputs.version }}/fetch-darwin-arm64
+            curl -L -o fetch https://git.enigmaneering.org/enigmaneering/redistributables/releases/download/go/fetch/${{ inputs.version }}/fetch-darwin-arm64
             chmod +x fetch
             ./fetch
 
             # macOS x86_64 (Intel)
-            curl -L -o fetch https://git.enigmaneering.org/enigmaneering/external/releases/download/go/fetch/${{ inputs.version }}/fetch-darwin-amd64
+            curl -L -o fetch https://git.enigmaneering.org/enigmaneering/redistributables/releases/download/go/fetch/${{ inputs.version }}/fetch-darwin-amd64
             chmod +x fetch
             ./fetch
 
             # Linux x86_64
-            curl -L -o fetch https://git.enigmaneering.org/enigmaneering/external/releases/download/go/fetch/${{ inputs.version }}/fetch-linux-amd64
+            curl -L -o fetch https://git.enigmaneering.org/enigmaneering/redistributables/releases/download/go/fetch/${{ inputs.version }}/fetch-linux-amd64
             chmod +x fetch
             ./fetch
 
             # Linux ARM64
-            curl -L -o fetch https://git.enigmaneering.org/enigmaneering/external/releases/download/go/fetch/${{ inputs.version }}/fetch-linux-arm64
+            curl -L -o fetch https://git.enigmaneering.org/enigmaneering/redistributables/releases/download/go/fetch/${{ inputs.version }}/fetch-linux-arm64
             chmod +x fetch
             ./fetch
 
             # Windows x86_64 (PowerShell)
-            Invoke-WebRequest -Uri "https://git.enigmaneering.org/enigmaneering/external/releases/download/go/fetch/${{ inputs.version }}/fetch-windows-amd64.exe" -OutFile "fetch.exe"
+            Invoke-WebRequest -Uri "https://git.enigmaneering.org/enigmaneering/redistributables/releases/download/go/fetch/${{ inputs.version }}/fetch-windows-amd64.exe" -OutFile "fetch.exe"
             .\fetch.exe
 
             # Windows ARM64 (PowerShell)
-            Invoke-WebRequest -Uri "https://git.enigmaneering.org/enigmaneering/external/releases/download/go/fetch/${{ inputs.version }}/fetch-windows-arm64.exe" -OutFile "fetch.exe"
+            Invoke-WebRequest -Uri "https://git.enigmaneering.org/enigmaneering/redistributables/releases/download/go/fetch/${{ inputs.version }}/fetch-windows-arm64.exe" -OutFile "fetch.exe"
             .\fetch.exe
             ```
 
             ### Using the Go Module
 
             ```go
-            import "github.com/enigmaneering/external/go/fetch/gpu"
+            import "github.com/enigmaneering/redistributables/go/fetch/gpu"
 
             func main() {
                 // Downloads and extracts latest toolchain to ./external/
@@ -177,7 +177,7 @@ jobs:
 
             Install:
             ```bash
-            go get github.com/enigmaneering/external/go/fetch@go/fetch/${{ inputs.version }}
+            go get github.com/enigmaneering/redistributables/go/fetch@go/fetch/${{ inputs.version }}
             ```
 
             ## 📦 Downloads
