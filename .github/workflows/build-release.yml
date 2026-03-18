@@ -483,45 +483,9 @@ jobs:
           name: naga-${{ matrix.platform }}
           path: ${{ runner.temp }}/output/naga-${{ matrix.platform }}.*
 
-  build-pocl:
-    needs: []
-    name: Build POCL
-    strategy:
-      fail-fast: true
-      matrix:
-        include:
-          - os: ubuntu-latest
-            runner: ubuntu-latest
-            platform: linux-amd64
-          - os: ubuntu-latest
-            runner: ubuntu-24.04-arm
-            platform: linux-arm64
-    runs-on: ${{ matrix.runner }}
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install LLVM
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y llvm-dev clang libclang-dev libclang-cpp-dev cmake pkg-config libhwloc-dev ocl-icd-opencl-dev
-
-      - name: Build POCL
-        shell: bash
-        run: |
-          chmod +x scripts/build-pocl.sh
-          BUILD_DIR="${{ runner.temp }}/build" \
-          OUTPUT_DIR="${{ runner.temp }}/output" \
-          bash scripts/build-pocl.sh
-
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: pocl-${{ matrix.platform }}
-          path: ${{ runner.temp }}/output/pocl-${{ matrix.platform }}.*
-
   determine-version:
     name: Determine Version
-    needs: [build-glslang, build-spirv-cross, build-dxc, download-dxc-prebuilt, build-naga, build-pocl]
+    needs: [build-glslang, build-spirv-cross, build-dxc, download-dxc-prebuilt, build-naga]
     runs-on: ubuntu-latest
     permissions:
       contents: write  # Need write permission to create and push tags
@@ -588,7 +552,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           path: artifacts
-          pattern: '{glslang,spirv-cross,dxc,naga,pocl}-*'
+          pattern: '{glslang,spirv-cross,dxc,naga}-*'
 
       - name: Display artifact structure
         run: ls -R artifacts
@@ -642,7 +606,6 @@ jobs:
             | **SPIRV-Cross** | SPIRV reflection and transpiler | SPIRV → GLSL/HLSL/MSL/WGSL |
             | **DXC** | DirectX Shader Compiler | HLSL → SPIRV/DXIL, WGSL support |
             | **Naga** | Rust-based WebGPU shader compiler | WGSL/GLSL/SPIRV ↔ SPIRV/WGSL/MSL/HLSL/GLSL |
-            | **POCL** | Portable Computing Language (OpenCL) | CPU-based OpenCL runtime with LLVM JIT |
 
             ## 💻 Supported Platforms
 
@@ -655,8 +618,6 @@ jobs:
             - ✅ Windows x86_64
             - ✅ Windows ARM64
 
-            **Note:** POCL is currently built for macOS and Linux platforms only.
-
             ## 📦 Manual Installation
 
             Download the appropriate `.tar.gz` (Unix) or `.zip` (Windows) archives for your platform and extract them to your project's `external/` directory.
@@ -666,7 +627,6 @@ jobs:
             - `spirv-cross-{platform}.tar.gz` / `.zip`
             - `dxc-{platform}.tar.gz` / `.zip`
             - `naga-{platform}.tar.gz` / `.zip`
-            - `pocl-{platform}.tar.gz` (macOS/Linux only)
 
             ## 🔄 Version Management
 
