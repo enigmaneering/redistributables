@@ -469,27 +469,20 @@ jobs:
 
           emmake cmake --build . --config Release -j$(nproc)
 
-          # Package
+          # Package — match native archive layout (headers + libs at root)
           PACKAGE_DIR="${{ runner.temp }}/output/spirv-cross-wasm"
-          mkdir -p "$PACKAGE_DIR/lib" "$PACKAGE_DIR/include/spirv_cross"
+          mkdir -p "$PACKAGE_DIR"
 
-          # Libraries
-          find . -name "*.a" -exec cp {} "$PACKAGE_DIR/lib/" \;
+          # Libraries at root
+          find . -name "*.a" -exec cp {} "$PACKAGE_DIR/" \;
 
-          # Headers
+          # Headers at root (same layout as native archives)
           cd "${{ github.workspace }}/wasm-build-spirv/SPIRV-Cross"
-          cp spirv_cross_c.h "$PACKAGE_DIR/include/spirv_cross/"
-          cp spirv.hpp "$PACKAGE_DIR/include/spirv_cross/"
-          cp spirv_cross.hpp "$PACKAGE_DIR/include/spirv_cross/"
-          cp spirv_glsl.hpp "$PACKAGE_DIR/include/spirv_cross/"
-          cp spirv_hlsl.hpp "$PACKAGE_DIR/include/spirv_cross/"
-          cp spirv_msl.hpp "$PACKAGE_DIR/include/spirv_cross/"
-          cp spirv_common.hpp "$PACKAGE_DIR/include/spirv_cross/"
-          cp spirv_cfg.hpp "$PACKAGE_DIR/include/spirv_cross/"
-          cp spirv_parser.hpp "$PACKAGE_DIR/include/spirv_cross/"
-          cp spirv_cross_parsed_ir.hpp "$PACKAGE_DIR/include/spirv_cross/"
-          cp spirv_cross_containers.hpp "$PACKAGE_DIR/include/spirv_cross/"
-          cp spirv_cross_error_handling.hpp "$PACKAGE_DIR/include/spirv_cross/"
+          cp spirv_cross_c.h spirv.hpp spirv_cross.hpp spirv_glsl.hpp \
+             spirv_hlsl.hpp spirv_msl.hpp spirv_common.hpp spirv_cfg.hpp \
+             spirv_parser.hpp spirv_cross_parsed_ir.hpp spirv_cross_containers.hpp \
+             spirv_cross_error_handling.hpp spirv.h spirv_cpp.hpp \
+             "$PACKAGE_DIR/" 2>/dev/null || true
 
           # License
           cp LICENSE "$PACKAGE_DIR/LICENSE"
