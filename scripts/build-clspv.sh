@@ -64,7 +64,20 @@ cd "$BUILD_DIR"
 # Clone clspv (no tagged releases — build from main)
 if [ ! -d "clspv" ]; then
     echo "Cloning clspv..."
+    set +e
     git clone https://github.com/google/clspv.git clspv
+    CLONE_EXIT=$?
+    set -e
+
+    if [ $CLONE_EXIT -ne 0 ]; then
+        if [ -d "clspv/.git" ]; then
+            echo "Warning: git clone exited with code $CLONE_EXIT but repository was created successfully"
+            echo "  (MSYS2 git on Windows commonly returns non-zero for benign checkout warnings)"
+        else
+            echo "Error: git clone failed (exit code $CLONE_EXIT)"
+            exit 1
+        fi
+    fi
 fi
 
 cd clspv
