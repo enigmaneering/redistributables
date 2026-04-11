@@ -766,11 +766,17 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Setup Python (for fetch_sources.py)
+        if: runner.os != 'Windows'
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
       - name: Install dependencies (Linux ARM64)
         if: matrix.platform == 'linux-arm64'
         run: |
           sudo apt-get update
-          sudo apt-get install -y gcc-11 g++-11 python3
+          sudo apt-get install -y gcc-11 g++-11
           sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-11 100
           sudo update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-11 100
 
