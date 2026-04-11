@@ -23,7 +23,7 @@ jobs:
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             REASON="${{ inputs.trigger_reason }}"
             if [ -z "$REASON" ] || [ "$REASON" = "Alpha and Omega" ]; then
-              echo "**Triggered by:** Manual dispatch" >> $GITHUB_STEP_SUMMARY
+              echo "**Triggered by:** Alpha and Omega" >> $GITHUB_STEP_SUMMARY
             else
               echo "**Triggered by:** $REASON" >> $GITHUB_STEP_SUMMARY
             fi
