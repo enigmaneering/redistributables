@@ -132,10 +132,16 @@ mkdir -p build
 cd build
 
 echo "Configuring clspv for WebAssembly..."
+# CLSPV_EXTERNAL_LIBCLC_DIR skips the libclc runtime build (handled by
+# Phase 1), which also prevents clspv from setting LLVM_TARGETS_TO_BUILD
+# to "Native".  However, LLVM's target parser tablegen always processes
+# ALL architecture .td files regardless of which backends are enabled.
+# The NATIVE tools bootstrap needs a real target so it can resolve paths
+# and build tablegen correctly — "X86" matches the CI host architecture.
 emcmake cmake .. \
     -DCMAKE_BUILD_TYPE=Release \
     -DCLSPV_EXTERNAL_LIBCLC_DIR="$LIBCLC_DIR_ABS" \
-    -DLLVM_USE_HOST_TOOLS=OFF \
+    -DLLVM_TARGETS_TO_BUILD="X86" \
     -DLLVM_ENABLE_EH=ON \
     -DLLVM_ENABLE_RTTI=ON \
     -DCLSPV_BUILD_TESTS=OFF \
@@ -143,7 +149,9 @@ emcmake cmake .. \
     -DENABLE_CLSPV_OPT=OFF \
     -DLLVM_INCLUDE_TESTS=OFF \
     -DLLVM_INCLUDE_EXAMPLES=OFF \
-    -DLLVM_INCLUDE_BENCHMARKS=OFF
+    -DLLVM_INCLUDE_BENCHMARKS=OFF \
+    -DLLVM_ENABLE_ZSTD=OFF \
+    -DLLVM_ENABLE_ZLIB=OFF
 
 echo "Building clspv for WebAssembly (this may take 20-40 minutes)..."
 emmake cmake --build . --config Release --target clspv -j$NCPU
