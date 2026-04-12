@@ -78,28 +78,23 @@ else
     echo "No Emscripten patches found — building without patches"
 fi
 
-# Configure clspv for WebAssembly
-mkdir -p build
-cd build
-
-echo "Configuring clspv for WebAssembly..."
-# On native builds, clspv internally sets LLVM_TARGETS_TO_BUILD="Native" and
-# LLVM_ENABLE_RUNTIMES="libclc" for the OpenCL C standard library.  Under
-# Emscripten, the "Native" target triggers a host-tool bootstrap (tablegen,
-# llvm-config) that fails because Emscripten can't cross-compile LLVM's
-# native target parser.
+# ================================================================
+#  Phase 1: Build libclc NATIVELY
 #
-# Fix: override both cache variables from the command line (takes precedence
-# over clspv's set(... CACHE ...)) to skip libclc and the native target
-# entirely.  clspv has its own builtin implementations and works without
-# libclc.
-emcmake cmake .. \
+#  clspv needs libclc's .bc files to generate its builtin header
+#  (clspv_builtin_library.h).  libclc requires building clang and
+#  an LLVM native backend — which can't be done under Emscripten.
+#
+#  Solution: build libclc with the host compiler first, then pass
+#  the .bc files to the WASM build via CLSPV_EXTERNAL_LIBCLC_DIR.
+# ================================================================
+echo ""
+echo "=== Phase 1: Building libclc natively (host compiler) ==="
+mkdir -p build-native
+cd build-native
+
+cmake .. \
     -DCMAKE_BUILD_TYPE=Release \
-    -DLLVM_USE_HOST_TOOLS=OFF \
-    -DLLVM_ENABLE_EH=ON \
-    -DLLVM_ENABLE_RTTI=ON \
-    -DLLVM_TARGETS_TO_BUILD="" \
-    -DLLVM_ENABLE_RUNTIMES="" \
     -DCLSPV_BUILD_TESTS=OFF \
     -DCLSPV_BUILD_SPIRV_DIS=OFF \
     -DENABLE_CLSPV_OPT=OFF \
@@ -107,7 +102,50 @@ emcmake cmake .. \
     -DLLVM_INCLUDE_EXAMPLES=OFF \
     -DLLVM_INCLUDE_BENCHMARKS=OFF
 
-echo "Building clspv for WebAssembly (this may take 30-60 minutes)..."
+echo "Building libclc (this builds clang first, ~15-20 minutes)..."
+cmake --build . --target libclc -j$NCPU
+
+# Locate the .bc files — they live under lib/clang/<ver>/lib/
+LIBCLC_BC=$(find . -path "*/spir--/libclc.bc" -print -quit)
+if [ -z "$LIBCLC_BC" ]; then
+    echo "Error: libclc.bc not found after native build"
+    find . -name "libclc.bc" 2>/dev/null || echo "  (no libclc.bc files found)"
+    exit 1
+fi
+LIBCLC_DIR=$(dirname "$(dirname "$LIBCLC_BC")")
+LIBCLC_DIR_ABS="$(cd "$LIBCLC_DIR" && pwd)"
+echo "libclc built successfully: $LIBCLC_DIR_ABS"
+ls -la "$LIBCLC_DIR_ABS"/spir*/libclc.bc
+
+cd "$BUILD_DIR/clspv-wasm-src"
+
+# ================================================================
+#  Phase 2: Build clspv for WebAssembly
+#
+#  Use CLSPV_EXTERNAL_LIBCLC_DIR to point at the native-built .bc
+#  files.  This skips the libclc runtime build and the "Native"
+#  LLVM target requirement — exactly what Emscripten needs.
+# ================================================================
+echo ""
+echo "=== Phase 2: Building clspv for WebAssembly ==="
+mkdir -p build
+cd build
+
+echo "Configuring clspv for WebAssembly..."
+emcmake cmake .. \
+    -DCMAKE_BUILD_TYPE=Release \
+    -DCLSPV_EXTERNAL_LIBCLC_DIR="$LIBCLC_DIR_ABS" \
+    -DLLVM_USE_HOST_TOOLS=OFF \
+    -DLLVM_ENABLE_EH=ON \
+    -DLLVM_ENABLE_RTTI=ON \
+    -DCLSPV_BUILD_TESTS=OFF \
+    -DCLSPV_BUILD_SPIRV_DIS=OFF \
+    -DENABLE_CLSPV_OPT=OFF \
+    -DLLVM_INCLUDE_TESTS=OFF \
+    -DLLVM_INCLUDE_EXAMPLES=OFF \
+    -DLLVM_INCLUDE_BENCHMARKS=OFF
+
+echo "Building clspv for WebAssembly (this may take 20-40 minutes)..."
 emmake cmake --build . --config Release --target clspv -j$NCPU
 
 # Package output
