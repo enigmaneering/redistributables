@@ -89,7 +89,7 @@ fi
 #  the .bc files to the WASM build via CLSPV_EXTERNAL_LIBCLC_DIR.
 # ================================================================
 echo ""
-echo "=== Phase 1: Building libclc natively (host compiler) ==="
+echo "=== Phase 1: Building libclc + native tools (host compiler) ==="
 mkdir -p build-native
 cd build-native
 
@@ -102,10 +102,11 @@ cmake .. \
     -DLLVM_INCLUDE_EXAMPLES=OFF \
     -DLLVM_INCLUDE_BENCHMARKS=OFF
 
-echo "Building libclc (this builds clang first, ~15-20 minutes)..."
-cmake --build . --target libclc -j$NCPU
+echo "Building libclc + clspv natively (~60-90 minutes)..."
+echo "  (Phase 2 will reuse the native tablegen/tblgen tools for WASM cross-compilation)"
+cmake --build . --target clspv -j$NCPU
 
-# Locate the .bc files — they live under lib/clang/<ver>/lib/
+# Locate the libclc .bc files
 LIBCLC_BC=$(find . -path "*/spir--/libclc.bc" -print -quit)
 if [ -z "$LIBCLC_BC" ]; then
     echo "Error: libclc.bc not found after native build"
@@ -115,19 +116,31 @@ fi
 LIBCLC_DIR=$(dirname "$(dirname "$LIBCLC_BC")")
 LIBCLC_DIR_ABS="$(cd "$LIBCLC_DIR" && pwd)"
 echo "libclc built successfully: $LIBCLC_DIR_ABS"
-ls -la "$LIBCLC_DIR_ABS"/spir*/libclc.bc
 
-# Copy the .bc files somewhere safe, then delete the entire Phase 1
-# build tree to reclaim disk.  The LLVM source + native build can
-# consume 15+ GB; CI runners only have ~14 GB free.
+# Save libclc .bc files
 LIBCLC_SAVED="$BUILD_DIR/libclc-prebuilt"
 mkdir -p "$LIBCLC_SAVED"
 cp -r "$LIBCLC_DIR_ABS"/* "$LIBCLC_SAVED/"
-echo "Saved libclc .bc files to $LIBCLC_SAVED"
-ls -la "$LIBCLC_SAVED"/spir*/libclc.bc
+
+# Save native tool binaries (tablegen, tblgen, etc.) for Phase 2.
+# These let the WASM cross-compilation skip the broken NATIVE bootstrap.
+NATIVE_TOOLS="$BUILD_DIR/native-tools"
+mkdir -p "$NATIVE_TOOLS"
+echo "Locating native tools in build tree..."
+for tool in llvm-min-tblgen llvm-tblgen clang-tblgen llvm-config; do
+    FOUND=$(find . -name "$tool" -type f -executable 2>/dev/null | head -1)
+    if [ -n "$FOUND" ]; then
+        cp "$FOUND" "$NATIVE_TOOLS/"
+        echo "  Saved: $tool (from $FOUND)"
+    else
+        echo "  Not found: $tool"
+    fi
+done
+echo "Native tools saved:"
+ls -la "$NATIVE_TOOLS/"
 
 cd "$BUILD_DIR/clspv-wasm-src"
-echo "Cleaning Phase 1 build to reclaim disk..."
+echo "Cleaning Phase 1 build objects (keeping source tree)..."
 rm -rf build-native
 echo "Disk after cleanup:"
 df -h . | tail -1
@@ -135,9 +148,11 @@ df -h . | tail -1
 # ================================================================
 #  Phase 2: Build clspv for WebAssembly
 #
-#  Use CLSPV_EXTERNAL_LIBCLC_DIR to point at the native-built .bc
-#  files.  This skips the libclc runtime build and the "Native"
-#  LLVM target requirement — exactly what Emscripten needs.
+#  Use CLSPV_EXTERNAL_LIBCLC_DIR for pre-built libclc, and
+#  LLVM_NATIVE_TOOL_DIR for pre-built host tools (tablegen, etc.).
+#  This avoids the NATIVE tools bootstrap that fails under
+#  Emscripten because it can't resolve source-tree paths for
+#  tablegen .td files during cross-compilation.
 # ================================================================
 echo ""
 echo "=== Phase 2: Building clspv for WebAssembly ==="
@@ -145,18 +160,14 @@ mkdir -p build
 cd build
 
 echo "Configuring clspv for WebAssembly..."
-# CLSPV_EXTERNAL_LIBCLC_DIR skips the libclc runtime build (handled by
-# Phase 1), which also prevents clspv from setting LLVM_TARGETS_TO_BUILD
-# to "Native".  However, LLVM's target parser tablegen always processes
-# ALL architecture .td files regardless of which backends are enabled.
-# The NATIVE tools bootstrap needs a real target so it can resolve paths
-# and build tablegen correctly — "X86" matches the CI host architecture.
 emcmake cmake .. \
     -DCMAKE_BUILD_TYPE=Release \
     -DCLSPV_EXTERNAL_LIBCLC_DIR="$LIBCLC_SAVED" \
-    -DLLVM_TARGETS_TO_BUILD="X86" \
+    -DLLVM_TABLEGEN="$NATIVE_TOOLS/llvm-tblgen" \
+    -DCLANG_TABLEGEN="$NATIVE_TOOLS/clang-tblgen" \
     -DLLVM_ENABLE_EH=ON \
     -DLLVM_ENABLE_RTTI=ON \
+    -DCMAKE_EXE_LINKER_FLAGS="-sNO_DISABLE_EXCEPTION_CATCHING -sNO_DISABLE_EXCEPTION_THROWING" \
     -DCLSPV_BUILD_TESTS=OFF \
     -DCLSPV_BUILD_SPIRV_DIS=OFF \
     -DENABLE_CLSPV_OPT=OFF \
