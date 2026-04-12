@@ -173,8 +173,13 @@ if [[ "$OSTYPE" == "msys" || "$OSTYPE" == "win32" || "$OSTYPE" == "cygwin" ]]; t
         CMAKE_CXX_COMPILER="-DCMAKE_CXX_COMPILER=${LLVM_MINGW_ROOT_WIN}/bin/clang++.exe"
         CMAKE_SYSTEM_PROCESSOR="-DCMAKE_SYSTEM_PROCESSOR=aarch64"
         SYSROOT_WIN="$(cygpath -m "$LLVM_MINGW_ABS")"
+        # libc++'s wrapper headers (cstddef, cstring, etc.) must be found
+        # BEFORE the C standard library headers.  --sysroot alone doesn't
+        # guarantee this ordering with top-of-tree LLVM/libc++, so add the
+        # libc++ include path explicitly via -isystem.
+        LIBCXX_INC="${SYSROOT_WIN}/include/c++/v1"
         export CFLAGS="--target=aarch64-w64-mingw32 --sysroot=${SYSROOT_WIN} -fcf-protection=none"
-        export CXXFLAGS="--target=aarch64-w64-mingw32 --sysroot=${SYSROOT_WIN} -fcf-protection=none"
+        export CXXFLAGS="--target=aarch64-w64-mingw32 --sysroot=${SYSROOT_WIN} -isystem ${LIBCXX_INC} -fcf-protection=none"
         export LDFLAGS="--sysroot=${SYSROOT_WIN}"
     fi
 fi
