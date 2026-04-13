@@ -1,5 +1,5 @@
 /*
- * mental_llvm.h — C API for LLVM-based GPU compilation
+ * mental_mlvm.h — C API for LLVM-based GPU compilation
  *
  * This is the translation layer for libmental.  It wraps LLVM/Clang C++
  * internals behind a flat C interface that mental can dlopen at runtime.
@@ -11,18 +11,18 @@
  *   - Compile LLVM IR to PTX or AMDGPU ISA
  *
  * All functions return 0 on success, non-zero on error.
- * Output buffers are allocated by the library — free with mental_llvm_free().
+ * Output buffers are allocated by the library — free with mental_mlvm_free().
  */
 
-#ifndef MENTAL_LLVM_H
-#define MENTAL_LLVM_H
+#ifndef MENTAL_MLVM_H
+#define MENTAL_MLVM_H
 
 #include <stddef.h>
 
 #ifdef _WIN32
-#define MENTAL_LLVM_EXPORT __declspec(dllexport)
+#define MENTAL_MLVM_EXPORT __declspec(dllexport)
 #else
-#define MENTAL_LLVM_EXPORT __attribute__((visibility("default")))
+#define MENTAL_MLVM_EXPORT __attribute__((visibility("default")))
 #endif
 
 #ifdef __cplusplus
@@ -33,18 +33,26 @@ extern "C" {
 /*  Source → GPU code (front-end + back-end in one call)               */
 /* ------------------------------------------------------------------ */
 
+/* Compile HLSL source to SPIR-V binary.
+ * Uses Clang's upstream HLSL frontend + SPIRV-LLVM-Translator.
+ * Replaces the dependency on Microsoft's DXC (LLVM fork). */
+MENTAL_MLVM_EXPORT
+int mental_mlvm_hlsl_to_spirv(const char* source, size_t source_len,
+                               char** spirv_out, size_t* spirv_len,
+                               char* error, size_t error_len);
+
 /* Compile CUDA source to NVIDIA PTX assembly.
  * The PTX can be loaded directly by the CUDA driver (cuModuleLoadData). */
-MENTAL_LLVM_EXPORT
-int mental_llvm_cuda_to_ptx(const char* source, size_t source_len,
+MENTAL_MLVM_EXPORT
+int mental_mlvm_cuda_to_ptx(const char* source, size_t source_len,
                             char** ptx_out, size_t* ptx_len,
                             char* error, size_t error_len);
 
 /* Compile OpenCL C source to OpenCL SPIR-V binary.
  * Uses Clang's OpenCL frontend + SPIRV-LLVM-Translator.
  * Produces OpenCL-flavored SPIR-V (execution model: Kernel). */
-MENTAL_LLVM_EXPORT
-int mental_llvm_opencl_to_spirv(const char* source, size_t source_len,
+MENTAL_MLVM_EXPORT
+int mental_mlvm_opencl_to_spirv(const char* source, size_t source_len,
                                  char** spirv_out, size_t* spirv_len,
                                  char* error, size_t error_len);
 
@@ -52,8 +60,8 @@ int mental_llvm_opencl_to_spirv(const char* source, size_t source_len,
  * Uses clspv (built-in) for memory model transformation —
  * flat pointers → descriptor sets/bindings.
  * Produces Vulkan-flavored SPIR-V (execution model: GLCompute). */
-MENTAL_LLVM_EXPORT
-int mental_llvm_opencl_to_vulkan_spirv(const char* source, size_t source_len,
+MENTAL_MLVM_EXPORT
+int mental_mlvm_opencl_to_vulkan_spirv(const char* source, size_t source_len,
                                         char** spirv_out, size_t* spirv_len,
                                         char* error, size_t error_len);
 
@@ -64,16 +72,16 @@ int mental_llvm_opencl_to_vulkan_spirv(const char* source, size_t source_len,
 /* Translate SPIR-V binary to LLVM IR bitcode.
  * Enables shader languages (GLSL/HLSL/WGSL) to reach GPU-native backends
  * (NVPTX, AMDGPU) by bridging the SPIR-V hub to the LLVM IR hub. */
-MENTAL_LLVM_EXPORT
-int mental_llvm_spirv_to_ir(const char* spirv, size_t spirv_len,
+MENTAL_MLVM_EXPORT
+int mental_mlvm_spirv_to_ir(const char* spirv, size_t spirv_len,
                              char** ir_out, size_t* ir_len,
                              char* error, size_t error_len);
 
 /* Translate LLVM IR bitcode to SPIR-V binary.
  * Enables compute languages (CUDA/OpenCL C) to reach shader backends
  * (Vulkan, Metal, WebGPU) by bridging the LLVM IR hub to the SPIR-V hub. */
-MENTAL_LLVM_EXPORT
-int mental_llvm_ir_to_spirv(const char* ir, size_t ir_len,
+MENTAL_MLVM_EXPORT
+int mental_mlvm_ir_to_spirv(const char* ir, size_t ir_len,
                              char** spirv_out, size_t* spirv_len,
                              char* error, size_t error_len);
 
@@ -82,14 +90,14 @@ int mental_llvm_ir_to_spirv(const char* ir, size_t ir_len,
 /* ------------------------------------------------------------------ */
 
 /* Compile LLVM IR bitcode to NVIDIA PTX assembly. */
-MENTAL_LLVM_EXPORT
-int mental_llvm_ir_to_ptx(const char* ir, size_t ir_len,
+MENTAL_MLVM_EXPORT
+int mental_mlvm_ir_to_ptx(const char* ir, size_t ir_len,
                            char** ptx_out, size_t* ptx_len,
                            char* error, size_t error_len);
 
 /* Compile LLVM IR bitcode to AMD GPU relocatable code object. */
-MENTAL_LLVM_EXPORT
-int mental_llvm_ir_to_amdgpu(const char* ir, size_t ir_len,
+MENTAL_MLVM_EXPORT
+int mental_mlvm_ir_to_amdgpu(const char* ir, size_t ir_len,
                               char** code_out, size_t* code_len,
                               char* error, size_t error_len);
 
@@ -98,15 +106,15 @@ int mental_llvm_ir_to_amdgpu(const char* ir, size_t ir_len,
 /* ------------------------------------------------------------------ */
 
 /* Free an output buffer allocated by any of the above functions. */
-MENTAL_LLVM_EXPORT
-void mental_llvm_free(char* buf);
+MENTAL_MLVM_EXPORT
+void mental_mlvm_free(char* buf);
 
 /* Return the LLVM version string (e.g. "20.1.5"). */
-MENTAL_LLVM_EXPORT
-const char* mental_llvm_version(void);
+MENTAL_MLVM_EXPORT
+const char* mental_mlvm_version(void);
 
 #ifdef __cplusplus
 }
 #endif
 
-#endif /* MENTAL_LLVM_H */
+#endif /* MENTAL_MLVM_H */

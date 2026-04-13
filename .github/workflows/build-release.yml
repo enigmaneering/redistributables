@@ -82,7 +82,6 @@ jobs:
           git clone --depth 1 https://github.com/KhronosGroup/SPIRV-Tools.git spirv-tools
           git clone --depth 1 https://github.com/KhronosGroup/SPIRV-Headers.git spirv-headers
           git clone --depth 1 https://github.com/KhronosGroup/SPIRV-Cross.git spirv-cross
-          git clone --depth 1 https://github.com/microsoft/DirectXShaderCompiler.git dxc
           git clone --depth 1 https://github.com/gfx-rs/wgpu-native.git wgpu-native
           git clone --depth 1 https://github.com/google/clspv.git clspv
           git clone --depth 1 --branch llvmorg-20.1.5 https://github.com/llvm/llvm-project.git llvm-project
@@ -93,8 +92,6 @@ jobs:
           EXPECTED_SPIRV_TOOLS="cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
           EXPECTED_SPIRV_HEADERS="ea43b1de38a6f90c488800d66dec1ed671e68cda530266bc96951fb5b6307613"
           EXPECTED_SPIRV_CROSS="cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
-          EXPECTED_DXC="27a49e35d1da96eba18fba54bc882667ff0ff8c0254f16f2b6e165d605ba7df8"
-          EXPECTED_DXIL_COMP="6f20fa7672b00e2e975c291df737cf227addf3ad32e36fef3fe0f416e4664d3d"
           EXPECTED_WGPU_MIT="c7fea58d1cfe49634cd92e54fc10a9d871f4b275321a4cd8c09e449122caaeb4"
           EXPECTED_WGPU_APACHE="a6cba85bc92e0cff7a450b1d873c0eaa2e9fc96bf472df0247a26bec77bf3ff9"
           EXPECTED_CLSPV="2050d82ea19614989deac39163c471b6e753659dfd4e4e88c6f724624db59f32"
@@ -120,8 +117,6 @@ jobs:
           check "SPIRV-Tools" spirv-tools/LICENSE "$EXPECTED_SPIRV_TOOLS"
           check "SPIRV-Headers" spirv-headers/LICENSE "$EXPECTED_SPIRV_HEADERS"
           check "SPIRV-Cross" spirv-cross/LICENSE "$EXPECTED_SPIRV_CROSS"
-          check "DXC" dxc/LICENSE.TXT "$EXPECTED_DXC"
-          check "DxilCompression" dxc/lib/DxilCompression/LICENSE.TXT "$EXPECTED_DXIL_COMP"
           check "wgpu-native MIT" wgpu-native/LICENSE.MIT "$EXPECTED_WGPU_MIT"
           check "wgpu-native Apache" wgpu-native/LICENSE.APACHE "$EXPECTED_WGPU_APACHE"
           check "clspv" clspv/LICENSE "$EXPECTED_CLSPV"
@@ -512,346 +507,9 @@ jobs:
           name: spirv-cross-wasm
           path: ${{ runner.temp }}/output/spirv-cross-wasm.tar.gz
 
-  build-dxc-wasm:
+  build-mlvm:
     needs: [verify-licenses]
-    name: Build DXC (WASM)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install Emscripten
-        uses: mymindstorm/setup-emsdk@v14
-        with:
-          version: "5.0.1"
-
-      - name: Build DXC for WASM
-        run: |
-          chmod +x scripts/build-dxc-wasm.sh
-          BUILD_DIR="${{ runner.temp }}/build" \
-          OUTPUT_DIR="${{ runner.temp }}/output" \
-          bash scripts/build-dxc-wasm.sh
-
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: dxc-wasm
-          path: ${{ runner.temp }}/output/dxc-wasm.*
-
-  build-dxc:
-    needs: [verify-licenses]
-    name: Build DXC (from source)
-    strategy:
-      fail-fast: true
-      matrix:
-        include:
-          - os: macos-latest
-            runner: macos-14  # ARM64
-            platform: darwin-arm64
-            macos_arch: arm64
-          - os: macos-latest
-            runner: macos-14  # Cross-compile x86_64 on ARM64
-            platform: darwin-amd64
-            macos_arch: x86_64
-          - os: ubuntu-latest
-            runner: ubuntu-24.04-arm
-            platform: linux-arm64
-    runs-on: ${{ matrix.runner }}
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install dependencies for DXC (Linux ARM64)
-        if: matrix.platform == 'linux-arm64'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y gcc-11 g++-11 python3
-          sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-11 100
-          sudo update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-11 100
-
-      - name: Build DXC (macOS/Linux)
-        shell: bash
-        run: |
-          chmod +x scripts/build-dxc.sh
-          BUILD_DIR="${{ runner.temp }}/build" \
-          OUTPUT_DIR="${{ runner.temp }}/output" \
-          MACOS_ARCH="${{ matrix.macos_arch || '' }}" \
-          bash scripts/build-dxc.sh
-
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: dxc-${{ matrix.platform }}
-          path: ${{ runner.temp }}/output/dxc-${{ matrix.platform }}.*
-
-  download-dxc-prebuilt:
-    needs: [verify-licenses]
-    name: Download DXC (Prebuilt)
-    strategy:
-      fail-fast: true
-      matrix:
-        include:
-          - platform: linux-amd64
-            os: ubuntu-latest
-            source: github
-          - platform: windows-amd64
-            os: windows-latest
-            source: nuget
-            nuget_arch: x64
-          - platform: windows-arm64
-            os: windows-latest
-            source: nuget
-            nuget_arch: arm64
-    runs-on: ${{ matrix.os }}
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Download DXC from GitHub (Linux)
-        if: matrix.source == 'github'
-        run: |
-          # Query GitHub API for latest release
-          echo "Querying GitHub for latest DXC release..."
-          LATEST_RELEASE=$(curl -s https://api.github.com/repos/microsoft/DirectXShaderCompiler/releases/latest)
-          RELEASE_TAG=$(echo "$LATEST_RELEASE" | grep '"tag_name"' | sed -E 's/.*"tag_name": "([^"]+)".*/\1/')
-
-          # Find the Linux x86_64 asset
-          ASSET_NAME=$(echo "$LATEST_RELEASE" | grep '"name".*linux.*x86_64.*tar.gz' | head -1 | sed -E 's/.*"name": "([^"]+)".*/\1/')
-
-          if [ -z "$RELEASE_TAG" ] || [ -z "$ASSET_NAME" ]; then
-            echo "Error: Could not determine latest release or asset name"
-            exit 1
-          fi
-
-          echo "Latest release: $RELEASE_TAG"
-          echo "Asset name: $ASSET_NAME"
-
-          DOWNLOAD_URL="https://github.com/microsoft/DirectXShaderCompiler/releases/download/$RELEASE_TAG/$ASSET_NAME"
-          echo "Downloading DXC for ${{ matrix.platform }} from GitHub"
-
-          # Download and verify licenses before downloading large binary (fail fast)
-          echo "Downloading DXC licenses..."
-          mkdir -p licenses
-          curl -L -o licenses/LICENSE.TXT \
-            "https://raw.githubusercontent.com/microsoft/DirectXShaderCompiler/$RELEASE_TAG/LICENSE.TXT" || \
-          curl -L -o licenses/LICENSE.TXT \
-            "https://raw.githubusercontent.com/microsoft/DirectXShaderCompiler/main/LICENSE.TXT"
-
-          # Download DxilCompression license
-          curl -L -o licenses/DxilCompression-LICENSE.TXT \
-            "https://raw.githubusercontent.com/microsoft/DirectXShaderCompiler/$RELEASE_TAG/lib/DxilCompression/LICENSE.TXT" || \
-          curl -L -o licenses/DxilCompression-LICENSE.TXT \
-            "https://raw.githubusercontent.com/microsoft/DirectXShaderCompiler/main/lib/DxilCompression/LICENSE.TXT"
-
-          if [ ! -f licenses/LICENSE.TXT ]; then
-            echo "Error: Failed to download main LICENSE"
-            exit 1
-          fi
-          echo "Licenses verified"
-
-          curl -L -o dxc.tar.gz "$DOWNLOAD_URL"
-
-          # Extract and repackage
-          mkdir -p output/dxc-${{ matrix.platform }}
-          tar -xzf dxc.tar.gz -C output/dxc-${{ matrix.platform }}
-
-          # Copy licenses
-          cp licenses/LICENSE.TXT output/dxc-${{ matrix.platform }}/LICENSE.TXT
-          mkdir -p output/dxc-${{ matrix.platform }}/LICENSES
-          if [ -f licenses/DxilCompression-LICENSE.TXT ]; then
-            cp licenses/DxilCompression-LICENSE.TXT output/dxc-${{ matrix.platform }}/LICENSES/
-          fi
-
-          # Create archive
-          cd output
-          tar -czf dxc-${{ matrix.platform }}.tar.gz dxc-${{ matrix.platform }}
-
-      - name: Download DXC from NuGet (Windows)
-        if: matrix.source == 'nuget'
-        shell: pwsh
-        run: |
-          $package = "Microsoft.Direct3D.DXC"
-          $platform = "${{ matrix.platform }}"
-          $arch = "${{ matrix.nuget_arch }}"
-
-          # Query NuGet for latest version
-          Write-Host "Querying NuGet for latest version of $package..."
-          $indexUrl = "https://api.nuget.org/v3-flatcontainer/$($package.ToLower())/index.json"
-          $versionsJson = Invoke-RestMethod -Uri $indexUrl
-          $version = $versionsJson.versions[-1]
-          Write-Host "Latest version: $version"
-
-          Write-Host "Downloading $package version $version from NuGet for $platform"
-
-          # Download NuGet package
-          $nugetUrl = "https://www.nuget.org/api/v2/package/$package/$version"
-          Invoke-WebRequest -Uri $nugetUrl -OutFile "dxc.nupkg"
-
-          # NuGet packages are zip files
-          Expand-Archive -Path "dxc.nupkg" -DestinationPath "nuget-extract"
-
-          # Verify license exists before copying binaries (fail fast)
-          Write-Host "Verifying license..."
-          $licenseExists = $false
-          if (Test-Path "nuget-extract/LICENSE.txt") {
-            $licenseExists = $true
-          } elseif (Test-Path "nuget-extract/LICENSE.TXT") {
-            $licenseExists = $true
-          } elseif (Test-Path "nuget-extract/LICENSE") {
-            $licenseExists = $true
-          }
-          if (-not $licenseExists) {
-            Write-Error "Error: LICENSE not found in NuGet package"
-            exit 1
-          }
-          Write-Host "License verified"
-
-          # Create output directory
-          New-Item -ItemType Directory -Force -Path "output/dxc-$platform"
-
-          # Windows binaries are in build/native/bin/{arch}/
-          Copy-Item -Path "nuget-extract/build/native/bin/$arch/*" -Destination "output/dxc-$platform/" -Recurse
-
-          # Copy licenses from NuGet package
-          Write-Host "Copying licenses..."
-          # Main license
-          if (Test-Path "nuget-extract/LICENSE.txt") {
-            Copy-Item -Path "nuget-extract/LICENSE.txt" -Destination "output/dxc-$platform/LICENSE.txt"
-          } elseif (Test-Path "nuget-extract/LICENSE.TXT") {
-            Copy-Item -Path "nuget-extract/LICENSE.TXT" -Destination "output/dxc-$platform/LICENSE.TXT"
-          } else {
-            Copy-Item -Path "nuget-extract/LICENSE" -Destination "output/dxc-$platform/LICENSE"
-          }
-
-          # Additional licenses
-          New-Item -ItemType Directory -Force -Path "output/dxc-$platform/LICENSES"
-          if (Test-Path "nuget-extract/LICENSE-LLVM.txt") {
-            Copy-Item -Path "nuget-extract/LICENSE-LLVM.txt" -Destination "output/dxc-$platform/LICENSES/LICENSE-LLVM.txt"
-          }
-
-          # Create archive
-          cd output
-          Compress-Archive -Path "dxc-$platform" -DestinationPath "dxc-$platform.zip"
-
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: dxc-${{ matrix.platform }}
-          path: |
-            output/dxc-${{ matrix.platform }}.tar.gz
-            output/dxc-${{ matrix.platform }}.zip
-
-  build-clspv:
-    needs: [verify-licenses]
-    name: Build clspv
-    strategy:
-      fail-fast: true
-      matrix:
-        include:
-          - os: macos-latest
-            runner: macos-14
-            platform: darwin-arm64
-            macos_arch: arm64
-          - os: macos-latest
-            runner: macos-14
-            platform: darwin-amd64
-            macos_arch: x86_64
-          - os: ubuntu-latest
-            runner: ubuntu-latest
-            platform: linux-amd64
-          - os: ubuntu-latest
-            runner: ubuntu-24.04-arm
-            platform: linux-arm64
-          - os: windows-latest
-            runner: windows-latest
-            platform: windows-amd64
-            mingw_arch: x86_64
-          - os: windows-latest
-            runner: windows-11-arm
-            platform: windows-arm64
-            mingw_arch: x86_64
-    runs-on: ${{ matrix.runner }}
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Setup Python (for fetch_sources.py)
-        if: runner.os != 'Windows'
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-
-      - name: Install dependencies (Linux ARM64)
-        if: matrix.platform == 'linux-arm64'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y gcc-11 g++-11
-          sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-11 100
-          sudo update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-11 100
-
-      - name: Install MinGW (Windows)
-        if: runner.os == 'Windows'
-        uses: msys2/setup-msys2@v2
-        with:
-          msystem: UCRT64
-          install: >-
-            mingw-w64-${{ matrix.mingw_arch }}-cmake
-            mingw-w64-${{ matrix.mingw_arch }}-ninja
-            mingw-w64-${{ matrix.mingw_arch }}-python
-            mingw-w64-${{ matrix.mingw_arch }}-clang
-            mingw-w64-${{ matrix.mingw_arch }}-lld
-            git
-            make
-
-      - name: Build clspv (Unix)
-        if: runner.os != 'Windows'
-        shell: bash
-        run: |
-          chmod +x scripts/build-clspv.sh
-          BUILD_DIR="${{ runner.temp }}/build" \
-          OUTPUT_DIR="${{ runner.temp }}/output" \
-          MACOS_ARCH="${{ matrix.macos_arch || '' }}" \
-          bash scripts/build-clspv.sh
-
-      - name: Build clspv (Windows)
-        if: runner.os == 'Windows'
-        shell: msys2 {0}
-        run: |
-          chmod +x scripts/build-clspv.sh
-          BUILD_DIR="${{ runner.temp }}/build" \
-          OUTPUT_DIR="${{ runner.temp }}/output" \
-          bash scripts/build-clspv.sh
-
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: clspv-${{ matrix.platform }}
-          path: ${{ runner.temp }}/output/clspv-${{ matrix.platform }}.*
-
-  build-clspv-wasm:
-    needs: [verify-licenses]
-    name: Build clspv (WASM)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install Emscripten
-        uses: mymindstorm/setup-emsdk@v14
-        with:
-          version: "5.0.1"
-
-      - name: Build clspv for WASM
-        run: |
-          chmod +x scripts/build-clspv-wasm.sh
-          BUILD_DIR="${{ runner.temp }}/build" \
-          OUTPUT_DIR="${{ runner.temp }}/output" \
-          bash scripts/build-clspv-wasm.sh
-
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: clspv-wasm
-          path: ${{ runner.temp }}/output/clspv-wasm.*
-
-  build-mental-llvm:
-    needs: [verify-licenses]
-    name: Build libmental-llvm
+    name: Build libmental-mlvm
     strategy:
       fail-fast: true
       matrix:
@@ -878,20 +536,46 @@ jobs:
           sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-11 100
           sudo update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-11 100
 
-      - name: Build libmental-llvm
+      - name: Build libmental-mlvm
         shell: bash
         run: |
-          chmod +x scripts/build-llvm.sh
+          chmod +x scripts/build-mlvm.sh
           BUILD_DIR="${{ runner.temp }}/build" \
           OUTPUT_DIR="${{ runner.temp }}/output" \
           MACOS_ARCH="${{ matrix.macos_arch || '' }}" \
-          bash scripts/build-llvm.sh
+          bash scripts/build-mlvm.sh
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: mental-llvm-${{ matrix.platform }}
-          path: ${{ runner.temp }}/output/mental-llvm-${{ matrix.platform }}.*
+          name: mental-mlvm-${{ matrix.platform }}
+          path: ${{ runner.temp }}/output/mental-mlvm-${{ matrix.platform }}.*
+
+  build-mlvm-wasm:
+    needs: [verify-licenses]
+    name: Build libmental-mlvm (WASM)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Emscripten
+        uses: mymindstorm/setup-emsdk@v14
+        with:
+          version: "5.0.1"
+
+      - name: Build libmental-mlvm for WASM
+        run: |
+          chmod +x scripts/build-mlvm.sh
+          BUILD_DIR="${{ runner.temp }}/build" \
+          OUTPUT_DIR="${{ runner.temp }}/output" \
+          WASM_BUILD=1 \
+          bash scripts/build-mlvm.sh
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: mental-mlvm-wasm
+          path: ${{ runner.temp }}/output/mental-mlvm-wasm.*
 
   build-naga:
     needs: [verify-licenses]
@@ -1089,7 +773,7 @@ jobs:
 
   determine-version:
     name: Determine Version
-    needs: [build-glslang, build-spirv-cross, build-wasm, build-dxc-wasm, build-dxc, download-dxc-prebuilt, build-clspv, build-clspv-wasm, build-naga, build-naga-wasm, download-wgpu-native, build-mental-llvm]
+    needs: [build-glslang, build-spirv-cross, build-wasm, build-mlvm, build-mlvm-wasm, build-naga, build-naga-wasm, download-wgpu-native]
     runs-on: ubuntu-latest
     permissions:
       contents: write  # Need write permission to create and push tags
@@ -1156,7 +840,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           path: artifacts
-          pattern: '{glslang,spirv-cross,dxc,naga,wgpu,clspv,mental-llvm}-*'
+          pattern: '{glslang,spirv-cross,naga,wgpu,mental-mlvm}-*'
 
       - name: Display artifact structure
         run: ls -R artifacts
@@ -1208,10 +892,9 @@ jobs:
             |------|-------------|--------------|
             | **glslang** | Reference GLSL/ESSL validator and compiler | GLSL/ESSL → SPIRV, with SPIRV optimizer |
             | **SPIRV-Cross** | SPIRV reflection and transpiler | SPIRV → GLSL/HLSL/MSL/WGSL |
-            | **DXC** | DirectX Shader Compiler | HLSL → SPIRV/DXIL, WGSL support |
             | **Naga** | Rust-based WebGPU shader compiler | WGSL/GLSL/SPIRV ↔ SPIRV/WGSL/MSL/HLSL/GLSL |
             | **clspv** | OpenCL C to Vulkan SPIR-V compiler | OpenCL C → SPIR-V for cross-backend compute |
-            | **libmental-llvm** | LLVM translation layer | CUDA → PTX, OpenCL C → SPIR-V, SPIR-V ↔ LLVM IR bridge |
+            | **libmental-mlvm** | LLVM translation layer | CUDA → PTX, OpenCL C → SPIR-V, SPIR-V ↔ LLVM IR bridge |
             | **wgpu-native** | Cross-platform WebGPU implementation | GPU compute via Metal/Vulkan/D3D12/OpenGL |
 
             ## 💻 Supported Platforms
@@ -1232,7 +915,6 @@ jobs:
             Each tool is packaged separately:
             - `glslang-{platform}.tar.gz` / `.zip`
             - `spirv-cross-{platform}.tar.gz` / `.zip`
-            - `dxc-{platform}.tar.gz` / `.zip`
             - `naga-{platform}.tar.gz` / `.zip`
             - `wgpu-{platform}.tar.gz`
 

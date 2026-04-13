@@ -1,13 +1,13 @@
 /*
- * mental_llvm.cpp — LLVM/Clang C++ wrapper for libmental
+ * mental_mlvm.cpp — LLVM/Clang C++ wrapper for libmental
  *
- * Implements the C API defined in mental_llvm.h by wrapping:
+ * Implements the C API defined in mental_mlvm.h by wrapping:
  *   - Clang CompilerInstance + CodeGenAction (CUDA/OpenCL C → LLVM IR)
  *   - LLVM TargetMachine (LLVM IR → PTX/AMDGPU)
  *   - SPIRV-LLVM-Translator (SPIR-V ↔ LLVM IR)
  */
 
-#include "mental_llvm.h"
+#include "mental_mlvm.h"
 
 #include <cstring>
 #include <cstdlib>
@@ -178,7 +178,42 @@ static int emit_to_target(
 /*  Public API: Source → GPU code                                      */
 /* ------------------------------------------------------------------ */
 
-extern "C" int mental_llvm_cuda_to_ptx(
+extern "C" int mental_mlvm_hlsl_to_spirv(
+    const char* source, size_t source_len,
+    char** spirv_out, size_t* spirv_len,
+    char* error, size_t error_len)
+{
+    ensure_initialized();
+
+    llvm::LLVMContext ctx;
+    std::string err;
+
+    auto module = compile_to_ir(ctx, source, source_len,
+                                 "hlsl", "dxil-ms-dx", err);
+    if (!module) {
+        if (error) snprintf(error, error_len, "%s", err.c_str());
+        return -1;
+    }
+
+    /* LLVM IR → SPIR-V via SPIRV-LLVM-Translator */
+    std::ostringstream os;
+    if (!writeSpirv(module.get(), os, err)) {
+        if (error) snprintf(error, error_len, "SPIRV write failed: %s", err.c_str());
+        return -1;
+    }
+
+    std::string spirv_data = os.str();
+    *spirv_len = spirv_data.size();
+    *spirv_out = (char*)malloc(spirv_data.size());
+    if (!*spirv_out) {
+        if (error) snprintf(error, error_len, "Failed to allocate output buffer");
+        return -1;
+    }
+    memcpy(*spirv_out, spirv_data.data(), spirv_data.size());
+    return 0;
+}
+
+extern "C" int mental_mlvm_cuda_to_ptx(
     const char* source, size_t source_len,
     char** ptx_out, size_t* ptx_len,
     char* error, size_t error_len)
@@ -204,7 +239,7 @@ extern "C" int mental_llvm_cuda_to_ptx(
     return 0;
 }
 
-extern "C" int mental_llvm_opencl_to_spirv(
+extern "C" int mental_mlvm_opencl_to_spirv(
     const char* source, size_t source_len,
     char** spirv_out, size_t* spirv_len,
     char* error, size_t error_len)
@@ -239,7 +274,7 @@ extern "C" int mental_llvm_opencl_to_spirv(
     return 0;
 }
 
-extern "C" int mental_llvm_opencl_to_vulkan_spirv(
+extern "C" int mental_mlvm_opencl_to_vulkan_spirv(
     const char* source, size_t source_len,
     char** spirv_out, size_t* spirv_len,
     char* error, size_t error_len)
@@ -277,7 +312,7 @@ extern "C" int mental_llvm_opencl_to_vulkan_spirv(
 /*  Public API: SPIR-V ↔ LLVM IR bridge                               */
 /* ------------------------------------------------------------------ */
 
-extern "C" int mental_llvm_spirv_to_ir(
+extern "C" int mental_mlvm_spirv_to_ir(
     const char* spirv, size_t spirv_len,
     char** ir_out, size_t* ir_len,
     char* error, size_t error_len)
@@ -312,7 +347,7 @@ extern "C" int mental_llvm_spirv_to_ir(
     return 0;
 }
 
-extern "C" int mental_llvm_ir_to_spirv(
+extern "C" int mental_mlvm_ir_to_spirv(
     const char* ir, size_t ir_len,
     char** spirv_out, size_t* spirv_len,
     char* error, size_t error_len)
@@ -355,7 +390,7 @@ extern "C" int mental_llvm_ir_to_spirv(
 /*  Public API: LLVM IR → GPU code                                     */
 /* ------------------------------------------------------------------ */
 
-extern "C" int mental_llvm_ir_to_ptx(
+extern "C" int mental_mlvm_ir_to_ptx(
     const char* ir, size_t ir_len,
     char** ptx_out, size_t* ptx_len,
     char* error, size_t error_len)
@@ -382,7 +417,7 @@ extern "C" int mental_llvm_ir_to_ptx(
     return 0;
 }
 
-extern "C" int mental_llvm_ir_to_amdgpu(
+extern "C" int mental_mlvm_ir_to_amdgpu(
     const char* ir, size_t ir_len,
     char** code_out, size_t* code_len,
     char* error, size_t error_len)
@@ -413,10 +448,10 @@ extern "C" int mental_llvm_ir_to_amdgpu(
 /*  Utility                                                            */
 /* ------------------------------------------------------------------ */
 
-extern "C" void mental_llvm_free(char* buf) {
+extern "C" void mental_mlvm_free(char* buf) {
     free(buf);
 }
 
-extern "C" const char* mental_llvm_version(void) {
+extern "C" const char* mental_mlvm_version(void) {
     return LLVM_VERSION_STRING;
 }

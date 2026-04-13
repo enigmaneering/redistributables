@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(mental-llvm C CXX)
+project(mental-mlvm C CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -54,9 +54,9 @@ llvm_map_components_to_libnames(LLVM_LIBS
 )
 
 # Build the shared library — everything statically linked inside
-add_library(mental-llvm SHARED mental_llvm.cpp)
+add_library(mental-mlvm SHARED mental_mlvm.cpp)
 
-target_include_directories(mental-llvm PRIVATE
+target_include_directories(mental-mlvm PRIVATE
     ${LLVM_INCLUDE_DIRS}
     ${CLANG_INCLUDE_DIRS}
     ${LLVM_SPIRV_INCLUDE}
@@ -65,7 +65,7 @@ target_include_directories(mental-llvm PRIVATE
 )
 
 # Static link: all LLVM + Clang + SPIRV-Translator baked into the .so
-target_link_libraries(mental-llvm PRIVATE
+target_link_libraries(mental-mlvm PRIVATE
     ${LLVM_LIBS}
     clangFrontend
     clangDriver
@@ -83,12 +83,12 @@ target_link_libraries(mental-llvm PRIVATE
     ${CLSPV_PASSES_LIB}
 )
 
-# Only export mental_llvm_* symbols — hide all LLVM/Clang internals
-set_target_properties(mental-llvm PROPERTIES
+# Only export mental_mlvm_* symbols — hide all LLVM/Clang internals
+set_target_properties(mental-mlvm PROPERTIES
     C_VISIBILITY_PRESET hidden
     CXX_VISIBILITY_PRESET hidden
     VISIBILITY_INLINES_HIDDEN ON
 )
 
-install(TARGETS mental-llvm DESTINATION lib)
-install(FILES mental_llvm.h DESTINATION include)
+install(TARGETS mental-mlvm DESTINATION lib)
+install(FILES mental_mlvm.h DESTINATION include)

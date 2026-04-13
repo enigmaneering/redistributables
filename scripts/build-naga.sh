@@ -114,6 +114,11 @@ fi
 # Build the CLI tool (naga-cli package produces naga binary)
 cargo build --release --package naga-cli $CARGO_TARGET_FLAG
 
+# Build the FFI shared library (naga-ffi crate produces libnaga_ffi.so/.dylib)
+echo "Building Naga FFI shared library..."
+FFI_DIR="$SCRIPT_DIR/../naga-ffi"
+cargo build --release --manifest-path "$FFI_DIR/Cargo.toml" $CARGO_TARGET_FLAG
+
 # Determine binary location
 if [ -n "$CARGO_TARGET" ]; then
     BINARY_DIR="target/$CARGO_TARGET/release"
@@ -124,14 +129,32 @@ fi
 # Package output
 PACKAGE_DIR="$OUTPUT_DIR/naga-$PLATFORM"
 mkdir -p "$PACKAGE_DIR/bin"
+mkdir -p "$PACKAGE_DIR/lib"
+mkdir -p "$PACKAGE_DIR/include"
 
-# Copy binary
+# Copy CLI binary
 echo "Packaging binary..."
 if [[ "$OSTYPE" == "msys" || "$OSTYPE" == "win32" || "$OSTYPE" == "cygwin" ]]; then
     cp "$BINARY_DIR/naga.exe" "$PACKAGE_DIR/bin/"
 else
     cp "$BINARY_DIR/naga" "$PACKAGE_DIR/bin/"
 fi
+
+# Copy FFI shared library
+echo "Packaging FFI shared library..."
+if [[ "$OSTYPE" == "darwin"* ]]; then
+    cp "$BINARY_DIR/libnaga_ffi.dylib" "$PACKAGE_DIR/lib/" 2>/dev/null || true
+    for dylib in "$PACKAGE_DIR/lib/"*.dylib; do
+        install_name_tool -id "@rpath/$(basename "$dylib")" "$dylib" 2>/dev/null || true
+    done
+elif [[ "$OSTYPE" == "msys" || "$OSTYPE" == "win32" || "$OSTYPE" == "cygwin" ]]; then
+    cp "$BINARY_DIR/naga_ffi.dll" "$PACKAGE_DIR/lib/" 2>/dev/null || true
+else
+    cp "$BINARY_DIR/libnaga_ffi.so" "$PACKAGE_DIR/lib/" 2>/dev/null || true
+fi
+
+# Copy FFI header
+cp "$FFI_DIR/naga_ffi.h" "$PACKAGE_DIR/include/"
 
 # Copy licenses (wgpu/naga is dual-licensed)
 echo "Packaging licenses..."
