@@ -160,8 +160,16 @@ mkdir -p build
 cd build
 
 echo "Configuring clspv for WebAssembly..."
+# Prefix the llvm and clang namespaces so clspv's LLVM internals don't
+# collide with DXC's copy of LLVM when both are statically linked into
+# the same WASM binary.  This only affects C++ namespace tokens —
+# #include paths and single-token identifiers (llvm_unreachable, etc.)
+# are NOT affected by preprocessor macro replacement.
+CLSPV_NS_FLAGS="-Dllvm=clspv_llvm -Dclang=clspv_clang"
 emcmake cmake .. \
     -DCMAKE_BUILD_TYPE=Release \
+    -DCMAKE_C_FLAGS="$CLSPV_NS_FLAGS" \
+    -DCMAKE_CXX_FLAGS="$CLSPV_NS_FLAGS" \
     -DCLSPV_EXTERNAL_LIBCLC_DIR="$LIBCLC_SAVED" \
     -DLLVM_TABLEGEN="$NATIVE_TOOLS/llvm-tblgen" \
     -DCLANG_TABLEGEN="$NATIVE_TOOLS/clang-tblgen" \
