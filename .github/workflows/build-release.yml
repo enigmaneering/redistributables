@@ -83,8 +83,9 @@ jobs:
           git clone --depth 1 https://github.com/KhronosGroup/SPIRV-Headers.git spirv-headers
           git clone --depth 1 https://github.com/KhronosGroup/SPIRV-Cross.git spirv-cross
           git clone --depth 1 https://github.com/gfx-rs/wgpu-native.git wgpu-native
+          git clone --depth 1 https://github.com/gfx-rs/wgpu.git wgpu
           git clone --depth 1 https://github.com/google/clspv.git clspv
-          git clone --depth 1 --branch llvmorg-20.1.5 https://github.com/llvm/llvm-project.git llvm-project
+          git clone --depth 1 https://github.com/llvm/llvm-project.git llvm-project
           git clone --depth 1 https://github.com/KhronosGroup/SPIRV-LLVM-Translator.git spirv-llvm-translator
 
           # Expected hashes — update when licenses are reviewed and approved
@@ -94,8 +95,11 @@ jobs:
           EXPECTED_SPIRV_CROSS="cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
           EXPECTED_WGPU_MIT="c7fea58d1cfe49634cd92e54fc10a9d871f4b275321a4cd8c09e449122caaeb4"
           EXPECTED_WGPU_APACHE="a6cba85bc92e0cff7a450b1d873c0eaa2e9fc96bf472df0247a26bec77bf3ff9"
+          EXPECTED_NAGA_MIT="dc0d97139e8205818c703741c7be7cb3b96888bd5917b8d6fc6133731e403c21"
+          EXPECTED_NAGA_APACHE="a6cba85bc92e0cff7a450b1d873c0eaa2e9fc96bf472df0247a26bec77bf3ff9"
           EXPECTED_CLSPV="2050d82ea19614989deac39163c471b6e753659dfd4e4e88c6f724624db59f32"
           EXPECTED_LLVM="8d85c1057d742e597985c7d4e6320b015a9139385cff4cbae06ffc0ebe89afee"
+          EXPECTED_CLANG="ebcd9bbf783a73d05c53ba4d586b8d5813dcdf3bbec50265860ccc885e606f47"
           EXPECTED_SPIRV_TRANSLATOR="e3bc36440fc927c62d5cc24efeefe225a14d4e34ffeb0c92e430625cce9ee444"
 
           FAILED=0
@@ -119,8 +123,11 @@ jobs:
           check "SPIRV-Cross" spirv-cross/LICENSE "$EXPECTED_SPIRV_CROSS"
           check "wgpu-native MIT" wgpu-native/LICENSE.MIT "$EXPECTED_WGPU_MIT"
           check "wgpu-native Apache" wgpu-native/LICENSE.APACHE "$EXPECTED_WGPU_APACHE"
+          check "Naga/wgpu MIT" wgpu/LICENSE.MIT "$EXPECTED_NAGA_MIT"
+          check "Naga/wgpu Apache" wgpu/LICENSE.APACHE "$EXPECTED_NAGA_APACHE"
           check "clspv" clspv/LICENSE "$EXPECTED_CLSPV"
           check "LLVM" llvm-project/llvm/LICENSE.TXT "$EXPECTED_LLVM"
+          check "Clang" llvm-project/clang/LICENSE.TXT "$EXPECTED_CLANG"
           check "SPIRV-LLVM-Translator" spirv-llvm-translator/LICENSE.TXT "$EXPECTED_SPIRV_TRANSLATOR"
 
           echo "CHANGES<<EOF" >> $GITHUB_ENV
