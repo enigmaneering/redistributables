@@ -2,13 +2,17 @@
 set -e
 
 # Build script for libmental-llvm
-# Produces a single self-contained shared library that wraps LLVM, Clang,
-# and SPIRV-LLVM-Translator behind a flat C API.  All dependencies are
-# statically linked into the shared library — no external libLLVM.so needed.
+# Produces a single self-contained shared library wrapping LLVM, Clang,
+# clspv, and SPIRV-LLVM-Translator behind a flat C API.
+#
+# The entire LLVM build is namespaced (-Dllvm=mlvm -Dclang=mlang) so
+# there is zero symbol crossover with other LLVM-based packages like DXC.
+# This eliminates the need for post-hoc symbol prefixing on any platform.
 #
 # mental dlopen's this one library to get:
-#   - CUDA → PTX (via Clang + NVPTX backend)
-#   - OpenCL C → SPIR-V (via Clang + SPIRV-LLVM-Translator)
+#   - CUDA → PTX (Clang + NVPTX backend)
+#   - OpenCL C → Vulkan SPIR-V (clspv passes + memory model transformation)
+#   - OpenCL C → OpenCL SPIR-V (Clang + SPIRV-LLVM-Translator)
 #   - SPIR-V ↔ LLVM IR bridge
 #   - LLVM IR → PTX / AMDGPU
 
@@ -53,25 +57,24 @@ if [ -z "$CMAKE" ]; then
 fi
 if [ -z "$CMAKE" ]; then echo "Error: cmake not found"; exit 1; fi
 
+# Find python
+PYTHON=$(command -v python3 2>/dev/null || command -v python 2>/dev/null || true)
+if [ -z "$PYTHON" ]; then
+    for p in /ucrt64/bin/python3.exe /ucrt64/bin/python.exe /mingw64/bin/python3.exe /mingw64/bin/python.exe; do
+        if [ -x "$p" ]; then PYTHON="$p"; break; fi
+    done
+fi
+
 mkdir -p "$BUILD_DIR"
 cd "$BUILD_DIR"
 
 # ================================================================
-#  Step 1: Clone LLVM + SPIRV-LLVM-Translator
+#  Step 1: Clone sources
 # ================================================================
 
-LLVM_VERSION="${LLVM_VERSION:-llvmorg-20.1.5}"
 if [ ! -d "llvm-project" ]; then
-    echo "Cloning LLVM $LLVM_VERSION..."
-    set +e
-    git clone --depth 1 --branch "$LLVM_VERSION" \
-        https://github.com/llvm/llvm-project.git
-    CLONE_EXIT=$?
-    set -e
-    if [ $CLONE_EXIT -ne 0 ] && [ ! -d "llvm-project/.git" ]; then
-        echo "Error: git clone failed"
-        exit 1
-    fi
+    echo "Cloning LLVM (latest main)..."
+    git clone --depth 1 https://github.com/llvm/llvm-project.git
 fi
 
 if [ ! -d "SPIRV-LLVM-Translator" ]; then
@@ -79,24 +82,39 @@ if [ ! -d "SPIRV-LLVM-Translator" ]; then
     git clone --depth 1 https://github.com/KhronosGroup/SPIRV-LLVM-Translator.git
 fi
 
+if [ ! -d "clspv" ]; then
+    echo "Cloning clspv..."
+    set +e
+    git clone https://github.com/google/clspv.git
+    CLONE_EXIT=$?
+    set -e
+    if [ $CLONE_EXIT -ne 0 ] && [ ! -d "clspv/.git" ]; then
+        echo "Error: git clone failed"; exit 1
+    fi
+fi
+
+# clspv needs its own dependencies (SPIRV-Tools, SPIRV-Headers) but
+# NOT its own LLVM — we'll point it at ours
+cd clspv
+if [ ! -d "third_party/SPIRV-Headers" ] && [ -n "$PYTHON" ]; then
+    echo "Fetching clspv dependencies (SPIRV-Tools, SPIRV-Headers)..."
+    $PYTHON utils/fetch_sources.py
+fi
+cd "$BUILD_DIR"
+
 # Verify licenses
 echo "Verifying licenses..."
-if [ ! -f "llvm-project/llvm/LICENSE.TXT" ]; then
-    echo "Error: LLVM LICENSE not found"
-    exit 1
-fi
-if [ ! -f "SPIRV-LLVM-Translator/LICENSE.TXT" ]; then
-    echo "Error: SPIRV-LLVM-Translator LICENSE not found"
-    exit 1
-fi
+for f in llvm-project/llvm/LICENSE.TXT SPIRV-LLVM-Translator/LICENSE.TXT clspv/LICENSE; do
+    if [ ! -f "$f" ]; then echo "Error: $f not found"; exit 1; fi
+done
 echo "Licenses verified"
 
 # ================================================================
-#  Step 2: Build LLVM + Clang as static libraries
+#  Step 2: Build LLVM + Clang (static, namespaced)
 # ================================================================
 
 echo ""
-echo "=== Building LLVM + Clang (static libraries) ==="
+echo "=== Building LLVM + Clang (namespaced: llvm→mlvm, clang→mlang) ==="
 cd llvm-project
 mkdir -p build
 cd build
@@ -110,11 +128,16 @@ if [[ "$OSTYPE" == "msys" || "$OSTYPE" == "win32" || "$OSTYPE" == "cygwin" ]]; t
     CMAKE_GENERATOR="-G Ninja"
 fi
 
+# Namespace the entire build to avoid symbol crossover with DXC
+NS_FLAGS="-Dllvm=mlvm -Dclang=mlang"
+
 $CMAKE ../llvm \
     $CMAKE_GENERATOR \
     $CMAKE_OSX_ARCH_FLAG \
     -DCMAKE_BUILD_TYPE=Release \
     -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
+    -DCMAKE_C_FLAGS="$NS_FLAGS" \
+    -DCMAKE_CXX_FLAGS="$NS_FLAGS" \
     -DLLVM_ENABLE_PROJECTS="clang" \
     -DLLVM_TARGETS_TO_BUILD="Native;NVPTX;AMDGPU" \
     -DLLVM_INCLUDE_TESTS=OFF \
@@ -136,7 +159,7 @@ LLVM_BUILD_DIR="$(pwd)"
 cd "$BUILD_DIR"
 
 # ================================================================
-#  Step 3: Build SPIRV-LLVM-Translator (static, against above LLVM)
+#  Step 3: Build SPIRV-LLVM-Translator (static, namespaced)
 # ================================================================
 
 echo ""
@@ -149,6 +172,8 @@ $CMAKE .. \
     $CMAKE_GENERATOR \
     -DCMAKE_BUILD_TYPE=Release \
     -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
+    -DCMAKE_C_FLAGS="$NS_FLAGS" \
+    -DCMAKE_CXX_FLAGS="$NS_FLAGS" \
     -DLLVM_DIR="$LLVM_BUILD_DIR/lib/cmake/llvm" \
     -DBUILD_SHARED_LIBS=OFF \
     -DLLVM_INCLUDE_TESTS=OFF
@@ -159,7 +184,36 @@ SPIRV_TRANSLATOR_BUILD="$(pwd)"
 cd "$BUILD_DIR"
 
 # ================================================================
-#  Step 4: Build libmental-llvm (shared, links everything statically)
+#  Step 4: Build clspv passes (static, against our LLVM)
+# ================================================================
+
+echo ""
+echo "=== Building clspv (against unified LLVM) ==="
+cd clspv
+mkdir -p build-unified
+cd build-unified
+
+$CMAKE .. \
+    $CMAKE_GENERATOR \
+    -DCMAKE_BUILD_TYPE=Release \
+    -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
+    -DCMAKE_C_FLAGS="$NS_FLAGS" \
+    -DCMAKE_CXX_FLAGS="$NS_FLAGS" \
+    -DCLSPV_LLVM_SOURCE_DIR="$BUILD_DIR/llvm-project/llvm" \
+    -DCLSPV_CLANG_SOURCE_DIR="$BUILD_DIR/llvm-project/clang" \
+    -DCLSPV_LLVM_BINARY_DIR="$LLVM_BUILD_DIR" \
+    -DCLSPV_SHARED_LIB=OFF \
+    -DCLSPV_BUILD_TESTS=OFF \
+    -DCLSPV_BUILD_SPIRV_DIS=OFF \
+    -DENABLE_CLSPV_OPT=OFF
+
+$CMAKE --build . --config Release --target clspv_core -j$NCPU
+
+CLSPV_BUILD_DIR="$(pwd)"
+cd "$BUILD_DIR"
+
+# ================================================================
+#  Step 5: Build libmental-llvm (shared, links everything)
 # ================================================================
 
 echo ""
@@ -172,9 +226,12 @@ $CMAKE "$WRAPPER_SRC" \
     $CMAKE_GENERATOR \
     $CMAKE_OSX_ARCH_FLAG \
     -DCMAKE_BUILD_TYPE=Release \
+    -DCMAKE_C_FLAGS="$NS_FLAGS" \
+    -DCMAKE_CXX_FLAGS="$NS_FLAGS" \
     -DLLVM_DIR="$LLVM_BUILD_DIR/lib/cmake/llvm" \
     -DClang_DIR="$LLVM_BUILD_DIR/lib/cmake/clang" \
-    -DSPIRV_TRANSLATOR_DIR="$SPIRV_TRANSLATOR_BUILD"
+    -DSPIRV_TRANSLATOR_DIR="$SPIRV_TRANSLATOR_BUILD" \
+    -DCLSPV_BUILD_DIR="$CLSPV_BUILD_DIR"
 
 $CMAKE --build . --config Release
 
@@ -221,6 +278,7 @@ mkdir -p "$PACKAGE_DIR/LICENSES"
 cp "$BUILD_DIR/llvm-project/llvm/LICENSE.TXT" "$PACKAGE_DIR/LICENSES/LLVM-LICENSE.TXT"
 cp "$BUILD_DIR/llvm-project/clang/LICENSE.TXT" "$PACKAGE_DIR/LICENSES/Clang-LICENSE.TXT" 2>/dev/null || true
 cp "$BUILD_DIR/SPIRV-LLVM-Translator/LICENSE.TXT" "$PACKAGE_DIR/LICENSES/SPIRV-LLVM-Translator-LICENSE.TXT"
+cp "$BUILD_DIR/clspv/LICENSE" "$PACKAGE_DIR/LICENSES/clspv-LICENSE"
 
 cd "$OUTPUT_DIR"
 tar -czf "mental-llvm-${PLATFORM}.tar.gz" "mental-llvm-$PLATFORM"

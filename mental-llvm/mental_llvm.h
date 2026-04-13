@@ -40,13 +40,22 @@ int mental_llvm_cuda_to_ptx(const char* source, size_t source_len,
                             char** ptx_out, size_t* ptx_len,
                             char* error, size_t error_len);
 
-/* Compile OpenCL C source to SPIR-V binary.
+/* Compile OpenCL C source to OpenCL SPIR-V binary.
  * Uses Clang's OpenCL frontend + SPIRV-LLVM-Translator.
  * Produces OpenCL-flavored SPIR-V (execution model: Kernel). */
 MENTAL_LLVM_EXPORT
 int mental_llvm_opencl_to_spirv(const char* source, size_t source_len,
                                  char** spirv_out, size_t* spirv_len,
                                  char* error, size_t error_len);
+
+/* Compile OpenCL C source to Vulkan SPIR-V binary.
+ * Uses clspv (built-in) for memory model transformation —
+ * flat pointers → descriptor sets/bindings.
+ * Produces Vulkan-flavored SPIR-V (execution model: GLCompute). */
+MENTAL_LLVM_EXPORT
+int mental_llvm_opencl_to_vulkan_spirv(const char* source, size_t source_len,
+                                        char** spirv_out, size_t* spirv_len,
+                                        char* error, size_t error_len);
 
 /* ------------------------------------------------------------------ */
 /*  SPIR-V ↔ LLVM IR bridge                                           */

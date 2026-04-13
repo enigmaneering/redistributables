@@ -39,6 +39,9 @@
 /* SPIRV-LLVM-Translator */
 #include <LLVMSPIRVLib.h>
 
+/* clspv (compiled into this library) */
+#include <clspv/Compiler.h>
+
 /* ------------------------------------------------------------------ */
 /*  One-time initialization                                           */
 /* ------------------------------------------------------------------ */
@@ -233,6 +236,40 @@ extern "C" int mental_llvm_opencl_to_spirv(
         return -1;
     }
     memcpy(*spirv_out, spirv_data.data(), spirv_data.size());
+    return 0;
+}
+
+extern "C" int mental_llvm_opencl_to_vulkan_spirv(
+    const char* source, size_t source_len,
+    char** spirv_out, size_t* spirv_len,
+    char* error, size_t error_len)
+{
+    /* Use clspv's C API — it handles memory model transformation
+     * (flat pointers → descriptor sets) that Vulkan requires. */
+    const char* programs[] = { source };
+    size_t sizes[] = { source_len };
+    char* output_binary = NULL;
+    size_t output_size = 0;
+    char* output_log = NULL;
+
+    ClspvError rc = clspvCompileFromSourcesString(
+        1, sizes, programs, "",
+        &output_binary, &output_size, &output_log);
+
+    if (rc != CLSPV_SUCCESS) {
+        if (error) {
+            if (output_log && output_log[0])
+                snprintf(error, error_len, "clspv: %s", output_log);
+            else
+                snprintf(error, error_len, "clspv: Compilation failed (error %d)", (int)rc);
+        }
+        clspvFreeOutputBuildObjs(output_binary, output_log);
+        return -1;
+    }
+
+    *spirv_len = output_size;
+    *spirv_out = output_binary;  /* clspv allocates with malloc */
+    free(output_log);
     return 0;
 }
 

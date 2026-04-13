@@ -28,6 +28,20 @@ if(NOT LLVM_SPIRV_LIB)
 endif()
 message(STATUS "Found LLVMSPIRVLib: ${LLVM_SPIRV_LIB}")
 
+# clspv (static library — provides OpenCL C → Vulkan SPIR-V)
+if(CLSPV_BUILD_DIR)
+    find_library(CLSPV_CORE_LIB clspv_core
+        HINTS "${CLSPV_BUILD_DIR}/lib" "${CLSPV_BUILD_DIR}"
+    )
+    find_library(CLSPV_PASSES_LIB clspv_passes
+        HINTS "${CLSPV_BUILD_DIR}/lib" "${CLSPV_BUILD_DIR}"
+    )
+    # clspv headers
+    get_filename_component(CLSPV_SOURCE_DIR "${CLSPV_BUILD_DIR}/.." ABSOLUTE)
+    set(CLSPV_INCLUDE "${CLSPV_SOURCE_DIR}/include")
+    message(STATUS "Found clspv: ${CLSPV_CORE_LIB}")
+endif()
+
 # Collect all LLVM static libraries we need
 llvm_map_components_to_libnames(LLVM_LIBS
     core support irreader bitreader bitwriter
@@ -46,6 +60,7 @@ target_include_directories(mental-llvm PRIVATE
     ${LLVM_INCLUDE_DIRS}
     ${CLANG_INCLUDE_DIRS}
     ${LLVM_SPIRV_INCLUDE}
+    ${CLSPV_INCLUDE}
     ${CMAKE_CURRENT_SOURCE_DIR}
 )
 
@@ -64,6 +79,8 @@ target_link_libraries(mental-llvm PRIVATE
     clangSerialization
     clangEdit
     ${LLVM_SPIRV_LIB}
+    ${CLSPV_CORE_LIB}
+    ${CLSPV_PASSES_LIB}
 )
 
 # Only export mental_llvm_* symbols — hide all LLVM/Clang internals
