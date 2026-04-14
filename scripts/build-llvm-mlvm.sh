@@ -44,10 +44,12 @@ if [ "$IS_WASM" -eq 1 ]; then
         -DLLVM_ENABLE_ZSTD=OFF \
         -DLLVM_ENABLE_ZLIB=OFF
 
-    $CMAKE --build . --config Release --target llvm-tblgen clang-tblgen -j$NCPU
+    # Build all native tools that the WASM cross-compilation needs
+    $CMAKE --build . --config Release --target llvm-min-tblgen llvm-tblgen clang-tblgen llvm-config -j$NCPU
 
-    NATIVE_TBLGEN_DIR="$(pwd)/bin"
-    echo "Native tablegen at: $NATIVE_TBLGEN_DIR"
+    NATIVE_TOOLS_DIR="$(pwd)/bin"
+    echo "Native tools at: $NATIVE_TOOLS_DIR"
+    ls -la "$NATIVE_TOOLS_DIR/"
 
     cd "$BUILD_DIR"
     echo "=== WASM Phase 2: Building LLVM for WebAssembly ==="
@@ -60,7 +62,7 @@ cd build
 # Configure
 WASM_FLAGS=""
 if [ "$IS_WASM" -eq 1 ]; then
-    WASM_FLAGS="-DLLVM_TABLEGEN=$NATIVE_TBLGEN_DIR/llvm-tblgen -DCLANG_TABLEGEN=$NATIVE_TBLGEN_DIR/clang-tblgen -DLLVM_ENABLE_EH=ON -DLLVM_ENABLE_RTTI=ON"
+    WASM_FLAGS="-DLLVM_TABLEGEN=$NATIVE_TOOLS_DIR/llvm-tblgen -DCLANG_TABLEGEN=$NATIVE_TOOLS_DIR/clang-tblgen -DLLVM_CONFIG_PATH=$NATIVE_TOOLS_DIR/llvm-config -DLLVM_NATIVE_TOOL_DIR=$NATIVE_TOOLS_DIR -DLLVM_ENABLE_EH=ON -DLLVM_ENABLE_RTTI=ON"
     export LDFLAGS="-sNO_DISABLE_EXCEPTION_CATCHING -sNO_DISABLE_EXCEPTION_THROWING"
     CMAKE_CMD="emcmake $CMAKE"
     MAKE_CMD="emmake $CMAKE"
