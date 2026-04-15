@@ -6,6 +6,12 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[1]}")" && pwd)"
 BUILD_DIR="${BUILD_DIR:-$SCRIPT_DIR/../build}"
 OUTPUT_DIR="${OUTPUT_DIR:-$SCRIPT_DIR/../output}"
 
+# Windows: ensure MSYS2 MinGW tools are on PATH (must happen before
+# platform detection since cmake/ninja/python resolution depends on it)
+if [[ "$OSTYPE" == "msys" || "$OSTYPE" == "win32" || "$OSTYPE" == "cygwin" ]]; then
+    export PATH="/mingw64/bin:/ucrt64/bin:$PATH"
+fi
+
 # Platform detection — prefer MENTAL_PLATFORM env var if set by CI,
 # since MSYS2 on Windows ARM64 misreports architecture as x86_64.
 IS_WASM=0
@@ -26,7 +32,6 @@ elif [[ "$OSTYPE" == "linux-gnu"* ]]; then
 elif [[ "$OSTYPE" == "msys" || "$OSTYPE" == "win32" || "$OSTYPE" == "cygwin" ]]; then
     PLATFORM="windows-$(uname -m)"
     PLATFORM=$(echo "$PLATFORM" | sed 's/x86_64/amd64/g' | sed 's/aarch64/arm64/g')
-    export PATH="/mingw64/bin:/ucrt64/bin:$PATH"
 fi
 
 # Parallelism
