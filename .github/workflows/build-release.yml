@@ -514,9 +514,9 @@ jobs:
           name: spirv-cross-wasm
           path: ${{ runner.temp }}/output/spirv-cross-wasm.tar.gz
 
-  build-llvm-mlvm:
+  build-llvm:
     needs: [verify-licenses]
-    name: "Build llvm-mlvm (${{ matrix.platform }})"
+    name: "Build LLVM (${{ matrix.platform }})"
     strategy:
       fail-fast: true
       matrix:
@@ -534,7 +534,7 @@ jobs:
           - runner: windows-latest
             platform: windows-amd64
             mingw_arch: x86_64
-          - runner: [self-hosted, galadriel-win-arm64]
+          - runner: windows-11-arm
             platform: windows-arm64
             mingw_arch: x86_64
           - runner: ubuntu-latest
@@ -544,12 +544,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Cache llvm-mlvm build
+      - name: Cache LLVM build
         id: cache-llvm
         uses: actions/cache@v4
         with:
-          path: ${{ runner.temp }}/output/llvm-mlvm-${{ matrix.platform }}.*
-          key: llvm-mlvm-${{ matrix.platform }}-${{ hashFiles('scripts/build-llvm-mlvm.sh', 'scripts/common.sh') }}
+          path: ${{ runner.temp }}/output/llvm-${{ matrix.platform }}.*
+          key: llvm-${{ matrix.platform }}-${{ hashFiles('scripts/build-llvm.sh', 'scripts/common.sh') }}
 
       - name: Install dependencies (Linux ARM64)
         if: steps.cache-llvm.outputs.cache-hit != 'true' && matrix.platform == 'linux-arm64'
@@ -579,35 +579,35 @@ jobs:
         with:
           version: "5.0.1"
 
-      - name: Build llvm-mlvm (Unix)
+      - name: Build LLVM (Unix)
         if: steps.cache-llvm.outputs.cache-hit != 'true' && runner.os != 'Windows'
         shell: bash
         run: |
-          chmod +x scripts/build-llvm-mlvm.sh
+          chmod +x scripts/build-llvm.sh
           BUILD_DIR="${{ runner.temp }}/build" \
           OUTPUT_DIR="${{ runner.temp }}/output" \
           MACOS_ARCH="${{ matrix.macos_arch || '' }}" \
           WASM_BUILD="${{ matrix.wasm && '1' || '0' }}" \
-          bash scripts/build-llvm-mlvm.sh
+          bash scripts/build-llvm.sh
 
-      - name: Build llvm-mlvm (Windows)
+      - name: Build LLVM (Windows)
         if: steps.cache-llvm.outputs.cache-hit != 'true' && runner.os == 'Windows'
         shell: msys2 {0}
         run: |
-          chmod +x scripts/build-llvm-mlvm.sh
+          chmod +x scripts/build-llvm.sh
           BUILD_DIR="${{ runner.temp }}/build" \
           OUTPUT_DIR="${{ runner.temp }}/output" \
-          bash scripts/build-llvm-mlvm.sh
+          bash scripts/build-llvm.sh
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: llvm-mlvm-${{ matrix.platform }}
-          path: ${{ runner.temp }}/output/llvm-mlvm-${{ matrix.platform }}.*
+          name: llvm-${{ matrix.platform }}
+          path: ${{ runner.temp }}/output/llvm-${{ matrix.platform }}.*
 
-  build-clspv-mlvm:
-    needs: [build-llvm-mlvm]
-    name: "Build clspv-mlvm (${{ matrix.platform }})"
+  build-clspv:
+    needs: [build-llvm]
+    name: "Build clspv (${{ matrix.platform }})"
     strategy:
       fail-fast: true
       matrix:
@@ -622,7 +622,7 @@ jobs:
             platform: linux-arm64
           - runner: windows-latest
             platform: windows-amd64
-          - runner: [self-hosted, galadriel-win-arm64]
+          - runner: windows-11-arm
             platform: windows-arm64
           - runner: ubuntu-latest
             platform: wasm
@@ -631,14 +631,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Download llvm-mlvm
+      - name: Download LLVM
         uses: actions/download-artifact@v4
         with:
-          name: llvm-mlvm-${{ matrix.platform }}
+          name: llvm-${{ matrix.platform }}
           path: artifacts
 
-      - name: Extract llvm-mlvm
-        run: tar -xzf artifacts/llvm-mlvm-${{ matrix.platform }}.tar.gz
+      - name: Extract LLVM
+        run: tar -xzf artifacts/llvm-${{ matrix.platform }}.tar.gz
 
       - name: Setup Python
         if: runner.os != 'Windows'
@@ -652,25 +652,25 @@ jobs:
         with:
           version: "5.0.1"
 
-      - name: Build clspv-mlvm
+      - name: Build clspv
         shell: bash
         run: |
-          chmod +x scripts/build-clspv-mlvm.sh
+          chmod +x scripts/build-clspv.sh
           BUILD_DIR="${{ runner.temp }}/build" \
           OUTPUT_DIR="${{ runner.temp }}/output" \
-          LLVM_MLVM_DIR="$(pwd)/llvm-mlvm-${{ matrix.platform }}" \
+          LLVM_BUILD_DIR="$(pwd)/llvm-${{ matrix.platform }}" \
           WASM_BUILD="${{ matrix.wasm && '1' || '0' }}" \
-          bash scripts/build-clspv-mlvm.sh
+          bash scripts/build-clspv.sh
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: clspv-mlvm-${{ matrix.platform }}
-          path: ${{ runner.temp }}/output/clspv-mlvm-${{ matrix.platform }}.*
+          name: clspv-${{ matrix.platform }}
+          path: ${{ runner.temp }}/output/clspv-${{ matrix.platform }}.*
 
-  build-spirv-llvm-translator-mlvm:
-    needs: [build-llvm-mlvm]
-    name: "Build spirv-llvm-translator-mlvm (${{ matrix.platform }})"
+  build-spirv-llvm-translator:
+    needs: [build-llvm]
+    name: "Build SPIRV-LLVM-Translator (${{ matrix.platform }})"
     strategy:
       fail-fast: true
       matrix:
@@ -685,7 +685,7 @@ jobs:
             platform: linux-arm64
           - runner: windows-latest
             platform: windows-amd64
-          - runner: [self-hosted, galadriel-win-arm64]
+          - runner: windows-11-arm
             platform: windows-arm64
           - runner: ubuntu-latest
             platform: wasm
@@ -694,14 +694,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Download llvm-mlvm
+      - name: Download LLVM
         uses: actions/download-artifact@v4
         with:
-          name: llvm-mlvm-${{ matrix.platform }}
+          name: llvm-${{ matrix.platform }}
           path: artifacts
 
-      - name: Extract llvm-mlvm
-        run: tar -xzf artifacts/llvm-mlvm-${{ matrix.platform }}.tar.gz
+      - name: Extract LLVM
+        run: tar -xzf artifacts/llvm-${{ matrix.platform }}.tar.gz
 
       - name: Install Emscripten (WASM)
         if: matrix.wasm
@@ -709,21 +709,21 @@ jobs:
         with:
           version: "5.0.1"
 
-      - name: Build spirv-llvm-translator-mlvm
+      - name: Build SPIRV-LLVM-Translator
         shell: bash
         run: |
-          chmod +x scripts/build-spirv-llvm-translator-mlvm.sh
+          chmod +x scripts/build-spirv-llvm-translator.sh
           BUILD_DIR="${{ runner.temp }}/build" \
           OUTPUT_DIR="${{ runner.temp }}/output" \
-          LLVM_MLVM_DIR="$(pwd)/llvm-mlvm-${{ matrix.platform }}" \
+          LLVM_BUILD_DIR="$(pwd)/llvm-${{ matrix.platform }}" \
           WASM_BUILD="${{ matrix.wasm && '1' || '0' }}" \
-          bash scripts/build-spirv-llvm-translator-mlvm.sh
+          bash scripts/build-spirv-llvm-translator.sh
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: spirv-llvm-translator-mlvm-${{ matrix.platform }}
-          path: ${{ runner.temp }}/output/spirv-llvm-translator-mlvm-${{ matrix.platform }}.*
+          name: spirv-llvm-translator-${{ matrix.platform }}
+          path: ${{ runner.temp }}/output/spirv-llvm-translator-${{ matrix.platform }}.*
 
   build-naga:
     needs: [verify-licenses]
@@ -904,7 +904,7 @@ jobs:
 
   determine-version:
     name: Determine Version
-    needs: [build-glslang, build-spirv-cross, build-wasm, build-llvm-mlvm, build-clspv-mlvm, build-spirv-llvm-translator-mlvm, build-naga, download-wgpu-native]
+    needs: [build-glslang, build-spirv-cross, build-wasm, build-llvm, build-clspv, build-spirv-llvm-translator, build-naga, download-wgpu-native]
     runs-on: ubuntu-latest
     permissions:
       contents: write  # Need write permission to create and push tags
@@ -971,7 +971,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           path: artifacts
-          pattern: '{glslang,spirv-cross,naga,wgpu,llvm-mlvm,clspv-mlvm,spirv-llvm-translator-mlvm}-*'
+          pattern: '{glslang,spirv-cross,naga,wgpu,llvm,clspv,spirv-llvm-translator}-*'
 
       - name: Display artifact structure
         run: ls -R artifacts
@@ -1025,9 +1025,9 @@ jobs:
             | **SPIRV-Cross** | SPIRV reflection and transpiler | SPIRV → GLSL/HLSL/MSL/WGSL |
             | **Naga** | Rust-based WebGPU shader compiler | WGSL/GLSL/SPIRV ↔ SPIRV/WGSL/MSL/HLSL/GLSL |
             | **clspv** | OpenCL C to Vulkan SPIR-V compiler | OpenCL C → SPIR-V for cross-backend compute |
-            | **llvm-mlvm** | Namespaced LLVM + Clang (NVPTX, AMDGPU backends) | Foundation for all mlvm tools |
-            | **clspv-mlvm** | OpenCL C → Vulkan SPIR-V (built against llvm-mlvm) | Memory model transformation |
-            | **spirv-llvm-translator-mlvm** | SPIR-V ↔ LLVM IR bridge (built against llvm-mlvm) | Cross-hub translation |
+            | **llvm** | LLVM + Clang (NVPTX, AMDGPU backends) | Foundation for clspv and SPIRV-LLVM-Translator |
+            | **clspv** | OpenCL C → Vulkan SPIR-V (built against llvm) | Memory model transformation |
+            | **spirv-llvm-translator** | SPIR-V ↔ LLVM IR bridge (built against llvm) | Cross-hub translation |
             | **wgpu-native** | Cross-platform WebGPU implementation | GPU compute via Metal/Vulkan/D3D12/OpenGL |
 
             ## 💻 Supported Platforms

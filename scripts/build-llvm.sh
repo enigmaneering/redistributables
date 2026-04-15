@@ -1,13 +1,13 @@
 #!/bin/bash
 set -e
 
-# Build LLVM + Clang for the MLVM toolchain.
+# Build LLVM + Clang for libmental.
 # Produces shared libraries (native) or static libraries (WASM).
-# All other mlvm-suffixed tools build against this.
+# All other downstream tools build against this.
 
 . "$(dirname "$0")/common.sh"
 
-echo "Building llvm-mlvm for $PLATFORM ($NCPU jobs)..."
+echo "Building llvm for $PLATFORM ($NCPU jobs)..."
 
 if [ -z "$CMAKE" ]; then echo "Error: cmake not found"; exit 1; fi
 
@@ -95,7 +95,7 @@ echo "Building LLVM (this may take a while)..."
 $MAKE_CMD --build . --config Release -j$NCPU
 
 # Install to package directory — this generates relocatable CMake config
-PACKAGE_DIR="$OUTPUT_DIR/llvm-mlvm-$PLATFORM"
+PACKAGE_DIR="$OUTPUT_DIR/llvm-$PLATFORM"
 echo "Installing to $PACKAGE_DIR..."
 $MAKE_CMD --build . --target install -- DESTDIR= CMAKE_INSTALL_PREFIX="$PACKAGE_DIR" 2>/dev/null || \
     cmake --install . --prefix "$PACKAGE_DIR"
@@ -113,6 +113,6 @@ cp ../llvm/LICENSE.TXT "$PACKAGE_DIR/LICENSES/LLVM-LICENSE.TXT"
 cp ../clang/LICENSE.TXT "$PACKAGE_DIR/LICENSES/Clang-LICENSE.TXT" 2>/dev/null || true
 
 cd "$OUTPUT_DIR"
-tar -czf "llvm-mlvm-${PLATFORM}.tar.gz" "llvm-mlvm-$PLATFORM"
-echo "Created: llvm-mlvm-${PLATFORM}.tar.gz"
+tar -czf "llvm-${PLATFORM}.tar.gz" "llvm-$PLATFORM"
+echo "Created: llvm-${PLATFORM}.tar.gz"
 echo "Build complete!"

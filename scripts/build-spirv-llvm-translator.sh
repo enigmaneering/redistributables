@@ -1,19 +1,19 @@
 #!/bin/bash
 set -e
 
-# Build SPIRV-LLVM-Translator against llvm-mlvm.
+# Build SPIRV-LLVM-Translator against llvm.
 # Bridges SPIR-V ↔ LLVM IR.
-# Requires: llvm-mlvm artifact (set LLVM_MLVM_DIR)
+# Requires: llvm artifact (set LLVM_BUILD_DIR)
 
 . "$(dirname "$0")/common.sh"
 
-echo "Building spirv-llvm-translator-mlvm for $PLATFORM ($NCPU jobs)..."
+echo "Building spirv-llvm-translator for $PLATFORM ($NCPU jobs)..."
 
 if [ -z "$CMAKE" ]; then echo "Error: cmake not found"; exit 1; fi
 
-LLVM_MLVM="${LLVM_MLVM_DIR:-$BUILD_DIR/llvm-project/build}"
-if [ ! -d "$LLVM_MLVM/lib/cmake/llvm" ]; then
-    echo "Error: llvm-mlvm not found at $LLVM_MLVM"
+LLVM_BUILD="${LLVM_BUILD_DIR:-$BUILD_DIR/llvm-project/build}"
+if [ ! -d "$LLVM_BUILD/lib/cmake/llvm" ]; then
+    echo "Error: llvm not found at $LLVM_BUILD"
     exit 1
 fi
 
@@ -45,17 +45,17 @@ $CMAKE_CMD .. \
     $CMAKE_GENERATOR \
     -DCMAKE_BUILD_TYPE=Release \
     -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
-    -DLLVM_DIR="$LLVM_MLVM/lib/cmake/llvm" \
+    -DLLVM_DIR="$LLVM_BUILD/lib/cmake/llvm" \
     -DBUILD_SHARED_LIBS=$SHARED \
     -DLLVM_INCLUDE_TESTS=OFF
 
 $MAKE_CMD --build . --config Release -j$NCPU
 
 # Package
-PACKAGE_DIR="$OUTPUT_DIR/spirv-llvm-translator-mlvm-$PLATFORM"
+PACKAGE_DIR="$OUTPUT_DIR/spirv-llvm-translator-$PLATFORM"
 mkdir -p "$PACKAGE_DIR/lib" "$PACKAGE_DIR/include"
 
-echo "Packaging spirv-llvm-translator-mlvm..."
+echo "Packaging spirv-llvm-translator..."
 if [ "$IS_WASM" -eq 1 ]; then
     find lib -name "*.a" | while read f; do cp "$f" "$PACKAGE_DIR/lib/"; done
 elif [[ "$OSTYPE" == "darwin"* ]]; then
@@ -70,6 +70,6 @@ cp -r ../include/LLVMSPIRVLib "$PACKAGE_DIR/include/" 2>/dev/null || true
 cp ../LICENSE.TXT "$PACKAGE_DIR/LICENSE.TXT"
 
 cd "$OUTPUT_DIR"
-tar -czf "spirv-llvm-translator-mlvm-${PLATFORM}.tar.gz" "spirv-llvm-translator-mlvm-$PLATFORM"
-echo "Created: spirv-llvm-translator-mlvm-${PLATFORM}.tar.gz"
+tar -czf "spirv-llvm-translator-${PLATFORM}.tar.gz" "spirv-llvm-translator-$PLATFORM"
+echo "Created: spirv-llvm-translator-${PLATFORM}.tar.gz"
 echo "Build complete!"
