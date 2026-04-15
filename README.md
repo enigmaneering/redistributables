@@ -1,6 +1,6 @@
 # Redistributables
 
-Pre-built shader compilation and GPU compute toolchain for [libmental](https://git.enigmaneering.org/enigmaneering/mental). All tools are built from source across 7 targets (6 native + WebAssembly).
+Pre-built shader compilation and GPU compute toolchain for [libmental](https://git.enigmaneering.org/enigmaneering/mental). All tools are faithful upstream builds across 7 targets (6 native + WebAssembly).
 
 ## Tools
 
@@ -10,11 +10,9 @@ Pre-built shader compilation and GPU compute toolchain for [libmental](https://g
 | **SPIRV-Cross** | SPIR-V to GLSL/HLSL/MSL | [Khronos](https://github.com/KhronosGroup/SPIRV-Cross) |
 | **Naga** | WGSL to/from SPIR-V (shared library via FFI) | [gfx-rs](https://github.com/gfx-rs/wgpu) |
 | **wgpu-native** | WebGPU runtime (Metal/Vulkan/D3D12/OpenGL) | [gfx-rs](https://github.com/gfx-rs/wgpu-native) |
-| **llvm-mlvm** | LLVM + Clang (NVPTX, AMDGPU backends) | [LLVM](https://github.com/llvm/llvm-project) |
-| **clspv-mlvm** | OpenCL C to Vulkan SPIR-V (built against llvm-mlvm) | [Google](https://github.com/google/clspv) |
-| **spirv-llvm-translator-mlvm** | SPIR-V ↔ LLVM IR bridge (built against llvm-mlvm) | [Khronos](https://github.com/KhronosGroup/SPIRV-LLVM-Translator) |
-
-The `-mlvm` suffix indicates tools built as part of the MLVM toolchain against a shared LLVM.
+| **LLVM** | LLVM + Clang (NVPTX, AMDGPU backends) | [LLVM](https://github.com/llvm/llvm-project) |
+| **clspv** | OpenCL C to Vulkan SPIR-V | [Google](https://github.com/google/clspv) |
+| **SPIRV-LLVM-Translator** | SPIR-V ↔ LLVM IR bridge | [Khronos](https://github.com/KhronosGroup/SPIRV-LLVM-Translator) |
 
 ## Platforms
 
