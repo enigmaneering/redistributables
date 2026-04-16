@@ -85,7 +85,8 @@ jobs:
           git clone --depth 1 https://github.com/gfx-rs/wgpu-native.git wgpu-native
           git clone --depth 1 https://github.com/gfx-rs/wgpu.git wgpu
           git clone --depth 1 https://github.com/google/clspv.git clspv
-          git clone --depth 1 https://github.com/llvm/llvm-project.git llvm-project
+          LLVM_TAG=$(curl -s https://api.github.com/repos/llvm/llvm-project/releases/latest | grep '"tag_name"' | sed -E 's/.*"tag_name": "([^"]+)".*/\1/')
+          git clone --depth 1 --branch "${LLVM_TAG:-llvmorg-22.1.3}" https://github.com/llvm/llvm-project.git llvm-project
           git clone --depth 1 https://github.com/KhronosGroup/SPIRV-LLVM-Translator.git spirv-llvm-translator
 
           # Expected hashes — update when licenses are reviewed and approved

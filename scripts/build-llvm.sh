@@ -14,10 +14,12 @@ if [ -z "$CMAKE" ]; then echo "Error: cmake not found"; exit 1; fi
 mkdir -p "$BUILD_DIR"
 cd "$BUILD_DIR"
 
-# Clone
+# Clone latest stable release
 if [ ! -d "llvm-project" ]; then
-    echo "Cloning LLVM (latest main)..."
-    git clone --depth 1 https://github.com/llvm/llvm-project.git
+    LLVM_TAG=$(curl -s https://api.github.com/repos/llvm/llvm-project/releases/latest | grep '"tag_name"' | sed -E 's/.*"tag_name": "([^"]+)".*/\1/')
+    if [ -z "$LLVM_TAG" ]; then LLVM_TAG="llvmorg-22.1.3"; fi
+    echo "Cloning LLVM $LLVM_TAG..."
+    git clone --depth 1 --branch "$LLVM_TAG" https://github.com/llvm/llvm-project.git
 fi
 
 # Verify license

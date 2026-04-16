@@ -2,9 +2,8 @@ name: Check for New Versions
 
 on:
   schedule:
-    # Run daily at 2 AM UTC
     - cron: '0 2 * * *'
-  workflow_dispatch: # Allow manual triggering
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -21,54 +20,68 @@ jobs:
       - name: Query for latest versions
         id: versions
         run: |
-          # Get latest DXC version from NuGet
-          echo "Checking DXC from NuGet..."
-          DXC_VERSION=$(curl -s "https://api.nuget.org/v3-flatcontainer/microsoft.direct3d.dxc/index.json" | grep -oE '"[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+"' | tail -1 | tr -d '"')
-          echo "dxc_version=$DXC_VERSION" >> $GITHUB_OUTPUT
-          echo "DXC: $DXC_VERSION"
+          echo "Checking upstream releases..."
 
-          # Get latest glslang version
-          echo "Checking glslang from GitHub..."
-          GLSLANG_VERSION=$(curl -s https://api.github.com/repos/KhronosGroup/glslang/releases/latest | grep '"tag_name"' | sed -E 's/.*"tag_name": "([^"]+)".*/\1/')
-          echo "glslang_version=$GLSLANG_VERSION" >> $GITHUB_OUTPUT
-          echo "glslang: $GLSLANG_VERSION"
+          GLSLANG=$(curl -s https://api.github.com/repos/KhronosGroup/glslang/releases/latest | grep '"tag_name"' | sed -E 's/.*"tag_name": "([^"]+)".*/\1/')
+          echo "glslang=$GLSLANG" >> $GITHUB_OUTPUT
+          echo "glslang: $GLSLANG"
 
-          # Get latest SPIRV-Cross Vulkan SDK tag
-          echo "Checking SPIRV-Cross from GitHub..."
-          SPIRV_CROSS_VERSION=$(curl -s https://api.github.com/repos/KhronosGroup/SPIRV-Cross/tags | grep '"name"' | grep 'vulkan-sdk-' | head -1 | sed -E 's/.*"name": "([^"]+)".*/\1/')
-          echo "spirv_cross_version=$SPIRV_CROSS_VERSION" >> $GITHUB_OUTPUT
-          echo "SPIRV-Cross: $SPIRV_CROSS_VERSION"
+          SPIRV_CROSS=$(curl -s https://api.github.com/repos/KhronosGroup/SPIRV-Cross/tags | grep '"name"' | grep 'vulkan-sdk-' | head -1 | sed -E 's/.*"name": "([^"]+)".*/\1/')
+          echo "spirv_cross=$SPIRV_CROSS" >> $GITHUB_OUTPUT
+          echo "SPIRV-Cross: $SPIRV_CROSS"
 
-          # Get latest wgpu-native version
-          echo "Checking wgpu-native from GitHub..."
-          WGPU_VERSION=$(curl -s https://api.github.com/repos/gfx-rs/wgpu-native/releases/latest | grep '"tag_name"' | sed -E 's/.*"tag_name": "([^"]+)".*/\1/')
-          echo "wgpu_version=$WGPU_VERSION" >> $GITHUB_OUTPUT
-          echo "wgpu-native: $WGPU_VERSION"
+          WGPU=$(curl -s https://api.github.com/repos/gfx-rs/wgpu-native/releases/latest | grep '"tag_name"' | sed -E 's/.*"tag_name": "([^"]+)".*/\1/')
+          echo "wgpu=$WGPU" >> $GITHUB_OUTPUT
+          echo "wgpu-native: $WGPU"
 
-      - name: Check current versions file
+          NAGA=$(curl -s https://api.github.com/repos/gfx-rs/wgpu/releases/latest | grep '"tag_name"' | sed -E 's/.*"tag_name": "([^"]+)".*/\1/')
+          echo "naga=$NAGA" >> $GITHUB_OUTPUT
+          echo "Naga/wgpu: $NAGA"
+
+          LLVM=$(curl -s https://api.github.com/repos/llvm/llvm-project/releases/latest | grep '"tag_name"' | sed -E 's/.*"tag_name": "([^"]+)".*/\1/')
+          echo "llvm=$LLVM" >> $GITHUB_OUTPUT
+          echo "LLVM: $LLVM"
+
+          SPIRV_TRANSLATOR=$(curl -s https://api.github.com/repos/KhronosGroup/SPIRV-LLVM-Translator/releases/latest | grep '"tag_name"' | sed -E 's/.*"tag_name": "([^"]+)".*/\1/')
+          echo "spirv_translator=$SPIRV_TRANSLATOR" >> $GITHUB_OUTPUT
+          echo "SPIRV-LLVM-Translator: $SPIRV_TRANSLATOR"
+
+          # clspv has no releases — track latest commit on main
+          CLSPV=$(curl -s https://api.github.com/repos/google/clspv/commits/main | grep '"sha"' | head -1 | sed -E 's/.*"sha": "([^"]+)".*/\1/' | cut -c1-12)
+          echo "clspv=$CLSPV" >> $GITHUB_OUTPUT
+          echo "clspv: $CLSPV (main)"
+
+      - name: Check current versions
         id: check
         run: |
-          # Create versions file if it doesn't exist
           if [ ! -f CURRENT_VERSIONS.txt ]; then
             echo "No CURRENT_VERSIONS.txt found, creating initial version"
             echo "needs_release=true" >> $GITHUB_OUTPUT
           else
-            # Compare with current versions
-            CURRENT_DXC=$(grep "DXC=" CURRENT_VERSIONS.txt | cut -d'=' -f2 || echo "")
             CURRENT_GLSLANG=$(grep "GLSLANG=" CURRENT_VERSIONS.txt | cut -d'=' -f2 || echo "")
             CURRENT_SPIRV_CROSS=$(grep "SPIRV_CROSS=" CURRENT_VERSIONS.txt | cut -d'=' -f2 || echo "")
             CURRENT_WGPU=$(grep "WGPU=" CURRENT_VERSIONS.txt | cut -d'=' -f2 || echo "")
+            CURRENT_NAGA=$(grep "NAGA=" CURRENT_VERSIONS.txt | cut -d'=' -f2 || echo "")
+            CURRENT_LLVM=$(grep "LLVM=" CURRENT_VERSIONS.txt | cut -d'=' -f2 || echo "")
+            CURRENT_SPIRV_TRANSLATOR=$(grep "SPIRV_TRANSLATOR=" CURRENT_VERSIONS.txt | cut -d'=' -f2 || echo "")
+            CURRENT_CLSPV=$(grep "CLSPV=" CURRENT_VERSIONS.txt | cut -d'=' -f2 || echo "")
 
             echo "Current versions:"
-            echo "  DXC: $CURRENT_DXC -> ${{ steps.versions.outputs.dxc_version }}"
-            echo "  glslang: $CURRENT_GLSLANG -> ${{ steps.versions.outputs.glslang_version }}"
-            echo "  SPIRV-Cross: $CURRENT_SPIRV_CROSS -> ${{ steps.versions.outputs.spirv_cross_version }}"
-            echo "  wgpu-native: $CURRENT_WGPU -> ${{ steps.versions.outputs.wgpu_version }}"
+            echo "  glslang: $CURRENT_GLSLANG -> ${{ steps.versions.outputs.glslang }}"
+            echo "  SPIRV-Cross: $CURRENT_SPIRV_CROSS -> ${{ steps.versions.outputs.spirv_cross }}"
+            echo "  wgpu-native: $CURRENT_WGPU -> ${{ steps.versions.outputs.wgpu }}"
+            echo "  Naga: $CURRENT_NAGA -> ${{ steps.versions.outputs.naga }}"
+            echo "  LLVM: $CURRENT_LLVM -> ${{ steps.versions.outputs.llvm }}"
+            echo "  SPIRV-LLVM-Translator: $CURRENT_SPIRV_TRANSLATOR -> ${{ steps.versions.outputs.spirv_translator }}"
+            echo "  clspv: $CURRENT_CLSPV -> ${{ steps.versions.outputs.clspv }}"
 
-            if [ "$CURRENT_DXC" != "${{ steps.versions.outputs.dxc_version }}" ] || \
-               [ "$CURRENT_GLSLANG" != "${{ steps.versions.outputs.glslang_version }}" ] || \
-               [ "$CURRENT_SPIRV_CROSS" != "${{ steps.versions.outputs.spirv_cross_version }}" ] || \
-               [ "$CURRENT_WGPU" != "${{ steps.versions.outputs.wgpu_version }}" ]; then
+            if [ "$CURRENT_GLSLANG" != "${{ steps.versions.outputs.glslang }}" ] || \
+               [ "$CURRENT_SPIRV_CROSS" != "${{ steps.versions.outputs.spirv_cross }}" ] || \
+               [ "$CURRENT_WGPU" != "${{ steps.versions.outputs.wgpu }}" ] || \
+               [ "$CURRENT_NAGA" != "${{ steps.versions.outputs.naga }}" ] || \
+               [ "$CURRENT_LLVM" != "${{ steps.versions.outputs.llvm }}" ] || \
+               [ "$CURRENT_SPIRV_TRANSLATOR" != "${{ steps.versions.outputs.spirv_translator }}" ] || \
+               [ "$CURRENT_CLSPV" != "${{ steps.versions.outputs.clspv }}" ]; then
               echo "New versions detected!"
               echo "needs_release=true" >> $GITHUB_OUTPUT
             else
@@ -80,55 +93,15 @@ jobs:
       - name: Update versions file
         if: steps.check.outputs.needs_release == 'true'
         run: |
-          cat > CURRENT_VERSIONS.txt <<EOF
-          DXC=${{ steps.versions.outputs.dxc_version }}
-          GLSLANG=${{ steps.versions.outputs.glslang_version }}
-          SPIRV_CROSS=${{ steps.versions.outputs.spirv_cross_version }}
-          WGPU=${{ steps.versions.outputs.wgpu_version }}
+          cat > CURRENT_VERSIONS.txt << EOF
+          GLSLANG=${{ steps.versions.outputs.glslang }}
+          SPIRV_CROSS=${{ steps.versions.outputs.spirv_cross }}
+          WGPU=${{ steps.versions.outputs.wgpu }}
+          NAGA=${{ steps.versions.outputs.naga }}
+          LLVM=${{ steps.versions.outputs.llvm }}
+          SPIRV_TRANSLATOR=${{ steps.versions.outputs.spirv_translator }}
+          CLSPV=${{ steps.versions.outputs.clspv }}
           UPDATED=$(date -u +"%Y-%m-%d %H:%M:%S UTC")
-          EOF
-
-      - name: Generate release notes
-        if: steps.check.outputs.needs_release == 'true'
-        id: release_notes
-        run: |
-          # Get previous versions for comparison
-          PREV_DXC=$(grep "DXC=" CURRENT_VERSIONS.txt 2>/dev/null | cut -d'=' -f2 || echo "none")
-          PREV_GLSLANG=$(grep "GLSLANG=" CURRENT_VERSIONS.txt 2>/dev/null | cut -d'=' -f2 || echo "none")
-          PREV_SPIRV_CROSS=$(grep "SPIRV_CROSS=" CURRENT_VERSIONS.txt 2>/dev/null | cut -d'=' -f2 || echo "none")
-          PREV_WGPU=$(grep "WGPU=" CURRENT_VERSIONS.txt 2>/dev/null | cut -d'=' -f2 || echo "none")
-
-          # Create release notes
-          cat > release_notes.md <<EOF
-          Automated release with updated shader compiler versions.
-
-          ## Version Updates
-
-          - **DXC**: $PREV_DXC → ${{ steps.versions.outputs.dxc_version }}
-          - **glslang**: $PREV_GLSLANG → ${{ steps.versions.outputs.glslang_version }}
-          - **SPIRV-Cross**: $PREV_SPIRV_CROSS → ${{ steps.versions.outputs.spirv_cross_version }}
-          - **wgpu-native**: $PREV_WGPU → ${{ steps.versions.outputs.wgpu_version }}
-
-          ## Sources
-
-          - DXC (Windows): [NuGet Package](https://www.nuget.org/packages/Microsoft.Direct3D.DXC/${{ steps.versions.outputs.dxc_version }})
-          - DXC (Linux): [GitHub Release](https://github.com/microsoft/DirectXShaderCompiler/releases/latest)
-          - glslang: [GitHub Release](https://github.com/KhronosGroup/glslang/releases/tag/${{ steps.versions.outputs.glslang_version }})
-          - SPIRV-Cross: [GitHub Tag](https://github.com/KhronosGroup/SPIRV-Cross/tree/${{ steps.versions.outputs.spirv_cross_version }})
-          - wgpu-native: [GitHub Release](https://github.com/gfx-rs/wgpu-native/releases/tag/${{ steps.versions.outputs.wgpu_version }})
-
-          ## Platforms
-
-          All binaries built for:
-          - darwin-amd64
-          - darwin-arm64
-          - linux-amd64
-          - linux-arm64
-          - windows-amd64
-          - windows-arm64
-
-          ---
-          🤖 This release was automatically generated by the version check workflow.
           EOF
 
       - name: Commit version changes
@@ -139,34 +112,14 @@ jobs:
           git add CURRENT_VERSIONS.txt
           git commit -m "Update dependency versions
 
-          - DXC: ${{ steps.versions.outputs.dxc_version }}
-          - glslang: ${{ steps.versions.outputs.glslang_version }}
-          - SPIRV-Cross: ${{ steps.versions.outputs.spirv_cross_version }}
-          - wgpu-native: ${{ steps.versions.outputs.wgpu_version }}"
+          - glslang: ${{ steps.versions.outputs.glslang }}
+          - SPIRV-Cross: ${{ steps.versions.outputs.spirv_cross }}
+          - wgpu-native: ${{ steps.versions.outputs.wgpu }}
+          - Naga: ${{ steps.versions.outputs.naga }}
+          - LLVM: ${{ steps.versions.outputs.llvm }}
+          - SPIRV-LLVM-Translator: ${{ steps.versions.outputs.spirv_translator }}
+          - clspv: ${{ steps.versions.outputs.clspv }}"
           git push
-
-      - name: Build trigger reason
-        if: steps.check.outputs.needs_release == 'true'
-        id: reason
-        run: |
-          CHANGES=""
-          CURRENT_DXC=$(grep "DXC=" CURRENT_VERSIONS.txt 2>/dev/null | cut -d'=' -f2 || echo "")
-          CURRENT_GLSLANG=$(grep "GLSLANG=" CURRENT_VERSIONS.txt 2>/dev/null | cut -d'=' -f2 || echo "")
-          CURRENT_SPIRV_CROSS=$(grep "SPIRV_CROSS=" CURRENT_VERSIONS.txt 2>/dev/null | cut -d'=' -f2 || echo "")
-          CURRENT_WGPU=$(grep "WGPU=" CURRENT_VERSIONS.txt 2>/dev/null | cut -d'=' -f2 || echo "")
-
-          [ "$CURRENT_DXC" != "${{ steps.versions.outputs.dxc_version }}" ] && \
-            CHANGES="${CHANGES}DXC: ${CURRENT_DXC} → ${{ steps.versions.outputs.dxc_version }}; "
-          [ "$CURRENT_GLSLANG" != "${{ steps.versions.outputs.glslang_version }}" ] && \
-            CHANGES="${CHANGES}glslang: ${CURRENT_GLSLANG} → ${{ steps.versions.outputs.glslang_version }}; "
-          [ "$CURRENT_SPIRV_CROSS" != "${{ steps.versions.outputs.spirv_cross_version }}" ] && \
-            CHANGES="${CHANGES}SPIRV-Cross: ${CURRENT_SPIRV_CROSS} → ${{ steps.versions.outputs.spirv_cross_version }}; "
-          [ "$CURRENT_WGPU" != "${{ steps.versions.outputs.wgpu_version }}" ] && \
-            CHANGES="${CHANGES}wgpu: ${CURRENT_WGPU} → ${{ steps.versions.outputs.wgpu_version }}; "
-
-          REASON="Auto: ${CHANGES%%; }"
-          echo "reason=$REASON" >> $GITHUB_OUTPUT
-          echo "Trigger reason: $REASON"
 
       - name: Trigger release workflow
         if: steps.check.outputs.needs_release == 'true'
@@ -179,26 +132,26 @@ jobs:
               workflow_id: 'build-release.yml',
               ref: 'main',
               inputs: {
-                trigger_reason: '${{ steps.reason.outputs.reason }}'
+                trigger_reason: 'Auto: upstream version update detected'
               }
             });
 
       - name: Summary
-        if: steps.check.outputs.needs_release == 'true'
         run: |
-          echo "## 🚀 Release Build Triggered" >> $GITHUB_STEP_SUMMARY
+          echo "## Dependency Versions" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "Build workflow will auto-increment version and create release." >> $GITHUB_STEP_SUMMARY
+          echo "| Tool | Version |" >> $GITHUB_STEP_SUMMARY
+          echo "|------|---------|" >> $GITHUB_STEP_SUMMARY
+          echo "| glslang | ${{ steps.versions.outputs.glslang }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| SPIRV-Cross | ${{ steps.versions.outputs.spirv_cross }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| wgpu-native | ${{ steps.versions.outputs.wgpu }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Naga | ${{ steps.versions.outputs.naga }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| LLVM | ${{ steps.versions.outputs.llvm }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| SPIRV-LLVM-Translator | ${{ steps.versions.outputs.spirv_translator }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| clspv | ${{ steps.versions.outputs.clspv }} (main) |" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### Updated Versions" >> $GITHUB_STEP_SUMMARY
-          echo "- DXC: ${{ steps.versions.outputs.dxc_version }}" >> $GITHUB_STEP_SUMMARY
-          echo "- glslang: ${{ steps.versions.outputs.glslang_version }}" >> $GITHUB_STEP_SUMMARY
-          echo "- SPIRV-Cross: ${{ steps.versions.outputs.spirv_cross_version }}" >> $GITHUB_STEP_SUMMARY
-          echo "- wgpu-native: ${{ steps.versions.outputs.wgpu_version }}" >> $GITHUB_STEP_SUMMARY
-
-      - name: No update needed
-        if: steps.check.outputs.needs_release == 'false'
-        run: |
-          echo "## ✅ All Dependencies Up to Date" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "No new versions detected." >> $GITHUB_STEP_SUMMARY
+          if [ "${{ steps.check.outputs.needs_release }}" = "true" ]; then
+            echo "🚀 **Release triggered** — new versions detected" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "✅ All dependencies up to date" >> $GITHUB_STEP_SUMMARY
+          fi

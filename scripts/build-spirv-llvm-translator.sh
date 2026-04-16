@@ -21,8 +21,10 @@ mkdir -p "$BUILD_DIR"
 cd "$BUILD_DIR"
 
 if [ ! -d "SPIRV-LLVM-Translator" ]; then
-    echo "Cloning SPIRV-LLVM-Translator..."
-    git clone --depth 1 https://github.com/KhronosGroup/SPIRV-LLVM-Translator.git
+    SLT_TAG=$(curl -s https://api.github.com/repos/KhronosGroup/SPIRV-LLVM-Translator/releases/latest | grep '"tag_name"' | sed -E 's/.*"tag_name": "([^"]+)".*/\1/')
+    if [ -z "$SLT_TAG" ]; then SLT_TAG="v22.1.1"; fi
+    echo "Cloning SPIRV-LLVM-Translator $SLT_TAG..."
+    git clone --depth 1 --branch "$SLT_TAG" https://github.com/KhronosGroup/SPIRV-LLVM-Translator.git
 fi
 
 cd SPIRV-LLVM-Translator
