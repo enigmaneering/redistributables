@@ -130,8 +130,10 @@ EXCLUDES=(
     --exclude=examples --exclude=benchmarks --exclude=bindings
     --exclude=.git
 )
-tar -cf - "${EXCLUDES[@]}" -C ../llvm . | tar -xf - -C "$PACKAGE_DIR/src/llvm"
-tar -cf - "${EXCLUDES[@]}" -C ../clang . | tar -xf - -C "$PACKAGE_DIR/src/clang"
+# --force-local prevents GNU tar from interpreting Windows drive letters
+# (e.g. D:\a\_temp/...) as old-style rsh "host:path" syntax on MSYS2.
+tar --force-local -cf - "${EXCLUDES[@]}" -C ../llvm . | tar --force-local -xf - -C "$PACKAGE_DIR/src/llvm"
+tar --force-local -cf - "${EXCLUDES[@]}" -C ../clang . | tar --force-local -xf - -C "$PACKAGE_DIR/src/clang"
 
 # Record the LLVM tag we built so consumers can verify version match
 if [ -d "../.git" ]; then

@@ -10,6 +10,15 @@ OUTPUT_DIR="${OUTPUT_DIR:-$SCRIPT_DIR/../output}"
 # platform detection since cmake/ninja/python resolution depends on it)
 if [[ "$OSTYPE" == "msys" || "$OSTYPE" == "win32" || "$OSTYPE" == "cygwin" ]]; then
     export PATH="/mingw64/bin:/ucrt64/bin:$PATH"
+
+    # Normalize Windows-native paths (e.g. D:\a\_temp/output) to POSIX form
+    # (/d/a/_temp/output) so tools like tar don't parse the drive-letter colon
+    # as old-style rsh "host:path" syntax. GitHub Actions' ${{ runner.temp }}
+    # is Windows-native, so BUILD_DIR/OUTPUT_DIR come in that form.
+    if command -v cygpath >/dev/null 2>&1; then
+        BUILD_DIR="$(cygpath -u "$BUILD_DIR")"
+        OUTPUT_DIR="$(cygpath -u "$OUTPUT_DIR")"
+    fi
 fi
 
 # Platform detection — prefer MENTAL_PLATFORM env var if set by CI,
