@@ -190,7 +190,7 @@ jobs:
 
   build-glslang:
     needs: [verify-licenses]
-    name: Build glslang
+    name: "Build glslang (${{ matrix.platform }})"
     strategy:
       fail-fast: true
       matrix:
@@ -218,6 +218,10 @@ jobs:
             platform: windows-arm64
             mingw_arch: x86_64
             cross_compile_target: aarch64
+          - os: ubuntu-latest
+            runner: ubuntu-latest
+            platform: wasm
+            wasm: true
     runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v4
@@ -263,6 +267,12 @@ jobs:
           mkdir -p D:/a/_temp/msys64/mingw64/aarch64-w64-mingw32
           cp -r llvm-mingw-20260311-ucrt-x86_64/aarch64-w64-mingw32/* D:/a/_temp/msys64/mingw64/aarch64-w64-mingw32/
 
+      - name: Install Emscripten (WASM)
+        if: matrix.wasm
+        uses: mymindstorm/setup-emsdk@v14
+        with:
+          version: "5.0.1"
+
       - name: Build glslang (Windows)
         if: matrix.mingw_arch
         shell: msys2 {0}
@@ -279,7 +289,7 @@ jobs:
           bash scripts/build-glslang.sh
 
       - name: Build glslang (macOS/Linux)
-        if: ${{ !matrix.mingw_arch }}
+        if: ${{ !matrix.mingw_arch && !matrix.wasm }}
         shell: bash
         run: |
           chmod +x scripts/build-glslang.sh
@@ -288,126 +298,9 @@ jobs:
           MACOS_ARCH="${{ matrix.macos_arch || '' }}" \
           bash scripts/build-glslang.sh
 
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: glslang-${{ matrix.platform }}
-          path: ${{ runner.temp }}/output/glslang-${{ matrix.platform }}.*
-
-  build-spirv-cross:
-    needs: [verify-licenses]
-    name: Build SPIRV-Cross
-    strategy:
-      fail-fast: true
-      matrix:
-        include:
-          - os: macos-latest
-            runner: macos-14  # ARM64
-            platform: darwin-arm64
-            macos_arch: arm64
-          - os: macos-latest
-            runner: macos-14  # Cross-compile x86_64 on ARM64
-            platform: darwin-amd64
-            macos_arch: x86_64
-          - os: ubuntu-latest
-            runner: ubuntu-latest
-            platform: linux-amd64
-          - os: ubuntu-latest
-            runner: ubuntu-24.04-arm
-            platform: linux-arm64
-          - os: windows-latest
-            runner: windows-latest
-            platform: windows-amd64
-            mingw_arch: x86_64
-          - os: windows-latest
-            runner: windows-latest
-            platform: windows-arm64
-            mingw_arch: x86_64
-            cross_compile_target: aarch64
-    runs-on: ${{ matrix.runner }}
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Setup MinGW (Windows)
-        if: matrix.mingw_arch
-        uses: msys2/setup-msys2@v2
-        with:
-          msystem: MINGW64
-          update: false
-          cache: true
-          install: >-
-            mingw-w64-${{ matrix.mingw_arch }}-gcc
-            mingw-w64-${{ matrix.mingw_arch }}-cmake
-            mingw-w64-${{ matrix.mingw_arch }}-ninja
-            mingw-w64-${{ matrix.mingw_arch }}-clang
-            mingw-w64-${{ matrix.mingw_arch }}-lld
-            git
-            make
-
-      - name: Cache llvm-mingw
-        if: matrix.cross_compile_target == 'aarch64'
-        id: cache-llvm-mingw
-        uses: actions/cache@v4
-        with:
-          path: llvm-mingw-20260311-ucrt-x86_64
-          key: llvm-mingw-20260311-ucrt-x86_64
-
-      - name: Download ARM64 MinGW runtime libraries
-        if: matrix.cross_compile_target == 'aarch64' && steps.cache-llvm-mingw.outputs.cache-hit != 'true'
+      - name: Build glslang (WASM)
+        if: matrix.wasm
         shell: bash
-        run: |
-          # Download llvm-mingw which has ARM64 runtime libraries
-          curl -L -o llvm-mingw.zip https://github.com/mstorsjo/llvm-mingw/releases/download/20260311/llvm-mingw-20260311-ucrt-x86_64.zip
-          unzip -q llvm-mingw.zip
-
-      - name: Setup ARM64 libraries
-        if: matrix.cross_compile_target == 'aarch64'
-        shell: bash
-        run: |
-          # Copy ARM64 libraries to a location where the linker can find them (use Windows path)
-          mkdir -p D:/a/_temp/msys64/mingw64/aarch64-w64-mingw32
-          cp -r llvm-mingw-20260311-ucrt-x86_64/aarch64-w64-mingw32/* D:/a/_temp/msys64/mingw64/aarch64-w64-mingw32/
-
-      - name: Build SPIRV-Cross (Windows)
-        if: matrix.mingw_arch
-        shell: msys2 {0}
-        run: |
-          export PATH="/mingw64/bin:$PATH"
-          BUILD_DIR="${{ runner.temp }}/build" \
-          OUTPUT_DIR="${{ runner.temp }}/output" \
-          USE_MINGW=1 \
-          CROSS_COMPILE_TARGET="${{ matrix.cross_compile_target || '' }}" \
-          bash scripts/build-spirv-cross.sh
-
-      - name: Build SPIRV-Cross (macOS/Linux)
-        if: ${{ !matrix.mingw_arch }}
-        shell: bash
-        run: |
-          chmod +x scripts/build-spirv-cross.sh
-          BUILD_DIR="${{ runner.temp }}/build" \
-          OUTPUT_DIR="${{ runner.temp }}/output" \
-          MACOS_ARCH="${{ matrix.macos_arch || '' }}" \
-          bash scripts/build-spirv-cross.sh
-
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: spirv-cross-${{ matrix.platform }}
-          path: ${{ runner.temp }}/output/spirv-cross-${{ matrix.platform }}.*
-
-  build-wasm:
-    needs: [verify-licenses]
-    name: Build WASM artifacts (glslang + SPIRV-Cross)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install Emscripten
-        uses: mymindstorm/setup-emsdk@v14
-        with:
-          version: "5.0.1"
-
-      - name: Build glslang for WASM
         run: |
           GLSLANG_VERSION=$(curl -s https://api.github.com/repos/KhronosGroup/glslang/releases/latest | grep '"tag_name"' | sed -E 's/.*"tag_name": "([^"]+)".*/\1/')
           echo "Building glslang $GLSLANG_VERSION for WASM..."
@@ -462,7 +355,120 @@ jobs:
           tar -czf "glslang-wasm.tar.gz" "glslang-wasm"
           echo "Created glslang-wasm.tar.gz"
 
-      - name: Build SPIRV-Cross for WASM
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: glslang-${{ matrix.platform }}
+          path: ${{ runner.temp }}/output/glslang-${{ matrix.platform }}.*
+
+  build-spirv-cross:
+    needs: [verify-licenses]
+    name: "Build SPIRV-Cross (${{ matrix.platform }})"
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - os: macos-latest
+            runner: macos-14  # ARM64
+            platform: darwin-arm64
+            macos_arch: arm64
+          - os: macos-latest
+            runner: macos-14  # Cross-compile x86_64 on ARM64
+            platform: darwin-amd64
+            macos_arch: x86_64
+          - os: ubuntu-latest
+            runner: ubuntu-latest
+            platform: linux-amd64
+          - os: ubuntu-latest
+            runner: ubuntu-24.04-arm
+            platform: linux-arm64
+          - os: windows-latest
+            runner: windows-latest
+            platform: windows-amd64
+            mingw_arch: x86_64
+          - os: windows-latest
+            runner: windows-latest
+            platform: windows-arm64
+            mingw_arch: x86_64
+            cross_compile_target: aarch64
+          - os: ubuntu-latest
+            runner: ubuntu-latest
+            platform: wasm
+            wasm: true
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup MinGW (Windows)
+        if: matrix.mingw_arch
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: false
+          cache: true
+          install: >-
+            mingw-w64-${{ matrix.mingw_arch }}-gcc
+            mingw-w64-${{ matrix.mingw_arch }}-cmake
+            mingw-w64-${{ matrix.mingw_arch }}-ninja
+            mingw-w64-${{ matrix.mingw_arch }}-clang
+            mingw-w64-${{ matrix.mingw_arch }}-lld
+            git
+            make
+
+      - name: Cache llvm-mingw
+        if: matrix.cross_compile_target == 'aarch64'
+        id: cache-llvm-mingw
+        uses: actions/cache@v4
+        with:
+          path: llvm-mingw-20260311-ucrt-x86_64
+          key: llvm-mingw-20260311-ucrt-x86_64
+
+      - name: Download ARM64 MinGW runtime libraries
+        if: matrix.cross_compile_target == 'aarch64' && steps.cache-llvm-mingw.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          # Download llvm-mingw which has ARM64 runtime libraries
+          curl -L -o llvm-mingw.zip https://github.com/mstorsjo/llvm-mingw/releases/download/20260311/llvm-mingw-20260311-ucrt-x86_64.zip
+          unzip -q llvm-mingw.zip
+
+      - name: Setup ARM64 libraries
+        if: matrix.cross_compile_target == 'aarch64'
+        shell: bash
+        run: |
+          # Copy ARM64 libraries to a location where the linker can find them (use Windows path)
+          mkdir -p D:/a/_temp/msys64/mingw64/aarch64-w64-mingw32
+          cp -r llvm-mingw-20260311-ucrt-x86_64/aarch64-w64-mingw32/* D:/a/_temp/msys64/mingw64/aarch64-w64-mingw32/
+
+      - name: Install Emscripten (WASM)
+        if: matrix.wasm
+        uses: mymindstorm/setup-emsdk@v14
+        with:
+          version: "5.0.1"
+
+      - name: Build SPIRV-Cross (Windows)
+        if: matrix.mingw_arch
+        shell: msys2 {0}
+        run: |
+          export PATH="/mingw64/bin:$PATH"
+          BUILD_DIR="${{ runner.temp }}/build" \
+          OUTPUT_DIR="${{ runner.temp }}/output" \
+          USE_MINGW=1 \
+          CROSS_COMPILE_TARGET="${{ matrix.cross_compile_target || '' }}" \
+          bash scripts/build-spirv-cross.sh
+
+      - name: Build SPIRV-Cross (macOS/Linux)
+        if: ${{ !matrix.mingw_arch && !matrix.wasm }}
+        shell: bash
+        run: |
+          chmod +x scripts/build-spirv-cross.sh
+          BUILD_DIR="${{ runner.temp }}/build" \
+          OUTPUT_DIR="${{ runner.temp }}/output" \
+          MACOS_ARCH="${{ matrix.macos_arch || '' }}" \
+          bash scripts/build-spirv-cross.sh
+
+      - name: Build SPIRV-Cross (WASM)
+        if: matrix.wasm
+        shell: bash
         run: |
           SPIRV_CROSS_VERSION=$(curl -s https://api.github.com/repos/KhronosGroup/SPIRV-Cross/tags | grep '"name"' | head -1 | sed -E 's/.*"name": "([^"]+)".*/\1/')
           echo "Building SPIRV-Cross $SPIRV_CROSS_VERSION for WASM..."
@@ -503,17 +509,11 @@ jobs:
           tar -czf "spirv-cross-wasm.tar.gz" "spirv-cross-wasm"
           echo "Created spirv-cross-wasm.tar.gz"
 
-      - name: Upload glslang-wasm
+      - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: glslang-wasm
-          path: ${{ runner.temp }}/output/glslang-wasm.tar.gz
-
-      - name: Upload spirv-cross-wasm
-        uses: actions/upload-artifact@v4
-        with:
-          name: spirv-cross-wasm
-          path: ${{ runner.temp }}/output/spirv-cross-wasm.tar.gz
+          name: spirv-cross-${{ matrix.platform }}
+          path: ${{ runner.temp }}/output/spirv-cross-${{ matrix.platform }}.*
 
   build-llvm:
     needs: [verify-licenses]
@@ -905,7 +905,7 @@ jobs:
 
   determine-version:
     name: Determine Version
-    needs: [build-glslang, build-spirv-cross, build-wasm, build-llvm, build-clspv, build-spirv-llvm-translator, build-naga, download-wgpu-native]
+    needs: [build-glslang, build-spirv-cross, build-llvm, build-clspv, build-spirv-llvm-translator, build-naga, download-wgpu-native]
     runs-on: ubuntu-latest
     permissions:
       contents: write  # Need write permission to create and push tags
