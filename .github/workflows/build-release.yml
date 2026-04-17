@@ -470,7 +470,14 @@ jobs:
         if: matrix.wasm
         shell: bash
         run: |
-          SPIRV_CROSS_VERSION=$(curl -s https://api.github.com/repos/KhronosGroup/SPIRV-Cross/tags | grep '"name"' | head -1 | sed -E 's/.*"name": "([^"]+)".*/\1/')
+          # Match build-spirv-cross.sh: filter for Vulkan SDK release tags, not
+          # whatever GitHub returns as the first tag (which can be a lightweight
+          # intermediate tag or empty on rate-limit).
+          SPIRV_CROSS_VERSION=$(curl -sSLf https://api.github.com/repos/KhronosGroup/SPIRV-Cross/tags | grep '"name"' | grep 'vulkan-sdk-' | head -1 | sed -E 's/.*"name": "([^"]+)".*/\1/')
+          if [ -z "$SPIRV_CROSS_VERSION" ]; then
+            echo "Error: could not determine latest SPIRV-Cross vulkan-sdk tag (rate-limited?)"
+            exit 1
+          fi
           echo "Building SPIRV-Cross $SPIRV_CROSS_VERSION for WASM..."
 
           mkdir -p wasm-build-spirv && cd wasm-build-spirv
@@ -649,13 +656,30 @@ jobs:
         with:
           python-version: '3.12'
 
+      - name: Install MinGW (Windows)
+        # Must match the UCRT64 toolchain LLVM was built with, otherwise
+        # LLVM's UCRT-decorated symbols (e.g. __imp__setjmp) won't resolve.
+        if: runner.os == 'Windows'
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          install: >-
+            mingw-w64-x86_64-cmake
+            mingw-w64-x86_64-ninja
+            mingw-w64-x86_64-python
+            mingw-w64-x86_64-clang
+            mingw-w64-x86_64-lld
+            git
+            make
+
       - name: Install Emscripten (WASM)
         if: matrix.wasm
         uses: mymindstorm/setup-emsdk@v14
         with:
           version: "5.0.1"
 
-      - name: Build clspv
+      - name: Build clspv (Unix)
+        if: runner.os != 'Windows'
         shell: bash
         run: |
           chmod +x scripts/build-clspv.sh
@@ -664,6 +688,16 @@ jobs:
           LLVM_BUILD_DIR="$(pwd)/llvm-${{ matrix.platform }}" \
           WASM_BUILD="${{ matrix.wasm && '1' || '0' }}" \
           MACOS_ARCH="${{ matrix.macos_arch || '' }}" \
+          MENTAL_PLATFORM="${{ matrix.platform }}" bash scripts/build-clspv.sh
+
+      - name: Build clspv (Windows)
+        if: runner.os == 'Windows'
+        shell: msys2 {0}
+        run: |
+          chmod +x scripts/build-clspv.sh
+          BUILD_DIR="${{ runner.temp }}/build" \
+          OUTPUT_DIR="${{ runner.temp }}/output" \
+          LLVM_BUILD_DIR="$(pwd)/llvm-${{ matrix.platform }}" \
           MENTAL_PLATFORM="${{ matrix.platform }}" bash scripts/build-clspv.sh
 
       - name: Upload artifact
@@ -709,13 +743,30 @@ jobs:
       - name: Extract LLVM
         run: tar -xzf artifacts/llvm-${{ matrix.platform }}.tar.gz
 
+      - name: Install MinGW (Windows)
+        # Must match the UCRT64 toolchain LLVM was built with, otherwise
+        # LLVM's UCRT-decorated symbols (e.g. __imp__setjmp) won't resolve.
+        if: runner.os == 'Windows'
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          install: >-
+            mingw-w64-x86_64-cmake
+            mingw-w64-x86_64-ninja
+            mingw-w64-x86_64-python
+            mingw-w64-x86_64-clang
+            mingw-w64-x86_64-lld
+            git
+            make
+
       - name: Install Emscripten (WASM)
         if: matrix.wasm
         uses: mymindstorm/setup-emsdk@v14
         with:
           version: "5.0.1"
 
-      - name: Build SPIRV-LLVM-Translator
+      - name: Build SPIRV-LLVM-Translator (Unix)
+        if: runner.os != 'Windows'
         shell: bash
         run: |
           chmod +x scripts/build-spirv-llvm-translator.sh
@@ -724,6 +775,16 @@ jobs:
           LLVM_BUILD_DIR="$(pwd)/llvm-${{ matrix.platform }}" \
           WASM_BUILD="${{ matrix.wasm && '1' || '0' }}" \
           MACOS_ARCH="${{ matrix.macos_arch || '' }}" \
+          MENTAL_PLATFORM="${{ matrix.platform }}" bash scripts/build-spirv-llvm-translator.sh
+
+      - name: Build SPIRV-LLVM-Translator (Windows)
+        if: runner.os == 'Windows'
+        shell: msys2 {0}
+        run: |
+          chmod +x scripts/build-spirv-llvm-translator.sh
+          BUILD_DIR="${{ runner.temp }}/build" \
+          OUTPUT_DIR="${{ runner.temp }}/output" \
+          LLVM_BUILD_DIR="$(pwd)/llvm-${{ matrix.platform }}" \
           MENTAL_PLATFORM="${{ matrix.platform }}" bash scripts/build-spirv-llvm-translator.sh
 
       - name: Upload artifact
