@@ -51,13 +51,13 @@ if [ "$IS_WASM" -eq 1 ]; then
         -DLLVM_ENABLE_ZLIB=OFF
 
     # Native tools: tablegen/llvm-config for Phase 2 cross-compile,
-    # clang/llvm-link/opt/llvm-config to bundle into the artifact for
-    # downstream consumers (libclc's build pipeline needs all four:
-    # clang emits .bc, llvm-link merges them, opt optimizes, llvm-config
-    # reports LLVM version/paths to libclc's CMake).
+    # clang/llvm-as/llvm-link/opt/llvm-config to bundle into the artifact
+    # for downstream consumers. libclc's CMake (libclc/CMakeLists.txt:137)
+    # requires this exact set of four tools — clang opt llvm-as llvm-link —
+    # and refuses to configure if any is missing.
     $CMAKE --build . --config Release \
         --target llvm-min-tblgen llvm-tblgen clang-tblgen llvm-config \
-                 clang llvm-link opt \
+                 clang llvm-as llvm-link opt \
         -j$NCPU
 
     NATIVE_TOOLS_DIR="$(pwd)/bin"
@@ -136,9 +136,11 @@ if [ "$IS_WASM" -eq 1 ]; then
     # The real clang binary is clang-<major>; clang and clang++ are symlinks
     # to it. Copy the real binary + preserve any clang* symlinks so invoking
     # "clang" or "clang++" from native/bin/ resolves correctly. Include the
-    # rest of libclc's needed tool chain (llvm-link, opt, llvm-config).
+    # rest of libclc's required tool chain (llvm-as, llvm-link, opt) plus
+    # llvm-config for version queries.
     for f in "$NATIVE_TOOLS_DIR"/clang "$NATIVE_TOOLS_DIR"/clang-[0-9]* \
              "$NATIVE_TOOLS_DIR"/clang++ \
+             "$NATIVE_TOOLS_DIR"/llvm-as \
              "$NATIVE_TOOLS_DIR"/llvm-link \
              "$NATIVE_TOOLS_DIR"/opt \
              "$NATIVE_TOOLS_DIR"/llvm-config; do

@@ -115,7 +115,8 @@ cd build
 # via CLSPV_EXTERNAL_LIBCLC_DIR.
 if [ "$IS_WASM" -eq 1 ]; then
     NATIVE_BIN="$LLVM_BUILD/native/bin"
-    for tool in clang llvm-link opt; do
+    # libclc requires this exact set (libclc/CMakeLists.txt:137).
+    for tool in clang llvm-as llvm-link opt; do
         if [ ! -x "$NATIVE_BIN/$tool" ]; then
             echo "Error: native $tool not found at $NATIVE_BIN/"
             echo "build-llvm.sh must bundle native tools (Phase 1 output) for WASM"
@@ -134,23 +135,23 @@ if [ "$IS_WASM" -eq 1 ]; then
         echo "=== WASM libclc prep: building spir-- bitcode ==="
         rm -rf "$LIBCLC_BUILD"
         mkdir -p "$LIBCLC_BUILD"
-        # libclc's toolchain detection uses LLVM_TOOLS_BINARY_DIR (exported
-        # by LLVMConfig.cmake) to locate clang/llvm-link/opt — NOT $PATH.
-        # The wasm LLVM's cmake config points that at the wasm install's
-        # bin/ directory (full of non-executable .js/.wasm stubs), so we
-        # override it to our native bin. Only tools we actually ship are
-        # pinned explicitly; any other tool libclc wants will surface as
-        # a specific "missing tool X" error we can then add to the bundle.
+        # libclc's CMakeLists.txt (line 61+) does find_package(LLVM), which
+        # sets LLVM_TOOLS_BINARY_DIR from LLVMConfig.cmake — that points at
+        # the wasm install's bin/ (full of .js/.wasm stubs, not executables).
+        # Passing -DLLVM_TOOLS_BINARY_DIR=... doesn't help — find_package
+        # overwrites it.
+        #
+        # libclc provides a purpose-built override hook: if
+        # LIBCLC_CUSTOM_LLVM_TOOLS_BINARY_DIR is set (line 121), it bypasses
+        # the find_package-derived path and does NO_DEFAULT_PATH
+        # find_program lookups in our dir instead.
         (cd "$LIBCLC_BUILD" && \
             "$CMAKE" "$LLVM_BUILD/src/libclc" \
                 -DCMAKE_BUILD_TYPE=Release \
                 -DCMAKE_INSTALL_PREFIX="$LIBCLC_INSTALL" \
                 -DLIBCLC_TARGETS_TO_BUILD="spir--" \
                 -DLLVM_DIR="$LLVM_BUILD/lib/cmake/llvm" \
-                -DLLVM_TOOLS_BINARY_DIR="$NATIVE_BIN" \
-                -DLLVM_CLANG="$NATIVE_BIN/clang" \
-                -DLLVM_LINK="$NATIVE_BIN/llvm-link" \
-                -DLLVM_OPT="$NATIVE_BIN/opt" && \
+                -DLIBCLC_CUSTOM_LLVM_TOOLS_BINARY_DIR="$NATIVE_BIN" && \
             "$CMAKE" --build . --config Release -j$NCPU && \
             "$CMAKE" --install .)
 
