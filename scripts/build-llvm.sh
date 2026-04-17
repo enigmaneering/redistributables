@@ -27,9 +27,15 @@ if [ ! -f "llvm-project/llvm/LICENSE.TXT" ]; then
     echo "Error: LLVM LICENSE not found"; exit 1
 fi
 
-# WASM: build native tools first (tablegen needs to run on host)
+# WASM: build native tools first. Tablegen must run on the host during
+# cross-compile (Phase 2). We also build native clang + llvm-link here so
+# the WASM artifact ships a natively-executable toolchain for downstream
+# consumers that need to emit LLVM bitcode on the host (e.g. clspv's libclc
+# build, which compiles .cl → spir-- .bc using a real process-exec'd clang).
+# These native binaries end up in $PACKAGE_DIR/bin-native/ (see packaging
+# step below); they are x86_64 Linux since the WASM LLVM job runs there.
 if [ "$IS_WASM" -eq 1 ]; then
-    echo "=== WASM Phase 1: Building native tablegen tools ==="
+    echo "=== WASM Phase 1: Building native tools (tablegen + clang + llvm-link) ==="
     cd llvm-project
     mkdir -p build-native
     cd build-native
@@ -44,8 +50,15 @@ if [ "$IS_WASM" -eq 1 ]; then
         -DLLVM_ENABLE_ZSTD=OFF \
         -DLLVM_ENABLE_ZLIB=OFF
 
-    # Build all native tools that the WASM cross-compilation needs
-    $CMAKE --build . --config Release --target llvm-min-tblgen llvm-tblgen clang-tblgen llvm-config -j$NCPU
+    # Native tools: tablegen/llvm-config for Phase 2 cross-compile,
+    # clang/llvm-link/opt/llvm-config to bundle into the artifact for
+    # downstream consumers (libclc's build pipeline needs all four:
+    # clang emits .bc, llvm-link merges them, opt optimizes, llvm-config
+    # reports LLVM version/paths to libclc's CMake).
+    $CMAKE --build . --config Release \
+        --target llvm-min-tblgen llvm-tblgen clang-tblgen llvm-config \
+                 clang llvm-link opt \
+        -j$NCPU
 
     NATIVE_TOOLS_DIR="$(pwd)/bin"
     echo "Native tools at: $NATIVE_TOOLS_DIR"
@@ -107,6 +120,38 @@ if [ "$IS_WASM" -eq 1 ]; then
     # the artifact is downloaded by a different job.
     echo "Installing WASM build to $PACKAGE_DIR..."
     "$CMAKE" --install . --prefix "$PACKAGE_DIR"
+
+    # Ship the Phase 1 native binaries alongside the wasm-compiled install.
+    # Downstream consumers (clspv's wasm libclc build) need a real,
+    # process-exec'd clang + llvm-link on the host — the wasm-compiled
+    # ones in $PACKAGE_DIR/bin/ can't be invoked as subprocesses.
+    #
+    # Laid out under $PACKAGE_DIR/native/{bin,lib} (not the top-level bin/lib
+    # which are owned by the wasm install) so clang's own prefix resolution
+    # — realpath(argv[0])/../.. — finds its resource dir at
+    # $PACKAGE_DIR/native/lib/clang/<ver>/ without us passing -resource-dir.
+    NATIVE_PREFIX="$PACKAGE_DIR/native"
+    echo "Bundling native clang + llvm-link into $NATIVE_PREFIX/bin/..."
+    mkdir -p "$NATIVE_PREFIX/bin"
+    # The real clang binary is clang-<major>; clang and clang++ are symlinks
+    # to it. Copy the real binary + preserve any clang* symlinks so invoking
+    # "clang" or "clang++" from native/bin/ resolves correctly. Include the
+    # rest of libclc's needed tool chain (llvm-link, opt, llvm-config).
+    for f in "$NATIVE_TOOLS_DIR"/clang "$NATIVE_TOOLS_DIR"/clang-[0-9]* \
+             "$NATIVE_TOOLS_DIR"/clang++ \
+             "$NATIVE_TOOLS_DIR"/llvm-link \
+             "$NATIVE_TOOLS_DIR"/opt \
+             "$NATIVE_TOOLS_DIR"/llvm-config; do
+        [ -e "$f" ] && cp -P "$f" "$NATIVE_PREFIX/bin/"
+    done
+    # Clang looks up its builtin headers (stddef.h, stdint.h, opencl-c.h, ...)
+    # via <prefix>/lib/clang/<ver>/include/, prefix = dirname(dirname(clang)).
+    # Ship the resource headers next to the native binaries.
+    NATIVE_BUILD_ROOT="$(dirname "$NATIVE_TOOLS_DIR")"
+    if [ -d "$NATIVE_BUILD_ROOT/lib/clang" ]; then
+        mkdir -p "$NATIVE_PREFIX/lib/clang"
+        cp -r "$NATIVE_BUILD_ROOT/lib/clang/"* "$NATIVE_PREFIX/lib/clang/"
+    fi
 else
     # Native: cmake --install generates relocatable CMake config
     echo "Installing to $PACKAGE_DIR..."

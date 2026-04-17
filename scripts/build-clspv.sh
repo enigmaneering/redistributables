@@ -105,13 +105,77 @@ if [ ! -f "LICENSE" ]; then echo "Error: LICENSE not found"; exit 1; fi
 mkdir -p build
 cd build
 
+# WASM libclc prep. Native clspv builds its own libclc in-tree (its CMake
+# calls clang directly from the local build). That works on native because
+# the clang being built is natively-executable. On WASM, the clang compiled
+# by emcmake is a .wasm module — can't be process-exec'd to drive libclc's
+# per-file .cl → .bc compiles. So we build libclc here first, using the
+# native clang + llvm-link + opt that build-llvm.sh ships at
+# $LLVM_BUILD/native/bin/, and feed the resulting spir-- bitcode to clspv
+# via CLSPV_EXTERNAL_LIBCLC_DIR.
+if [ "$IS_WASM" -eq 1 ]; then
+    NATIVE_BIN="$LLVM_BUILD/native/bin"
+    for tool in clang llvm-link opt; do
+        if [ ! -x "$NATIVE_BIN/$tool" ]; then
+            echo "Error: native $tool not found at $NATIVE_BIN/"
+            echo "build-llvm.sh must bundle native tools (Phase 1 output) for WASM"
+            exit 1
+        fi
+    done
+    if [ ! -d "$LLVM_BUILD/src/libclc" ]; then
+        echo "Error: libclc source not found at $LLVM_BUILD/src/libclc"
+        echo "build-llvm.sh must bundle the full llvm-project source tree"
+        exit 1
+    fi
+
+    LIBCLC_BUILD="$BUILD_DIR/libclc-build"
+    LIBCLC_INSTALL="$BUILD_DIR/libclc-install"
+    if [ ! -f "$LIBCLC_INSTALL/spir--/libclc.bc" ]; then
+        echo "=== WASM libclc prep: building spir-- bitcode ==="
+        rm -rf "$LIBCLC_BUILD"
+        mkdir -p "$LIBCLC_BUILD"
+        # Prepend native tools to PATH so libclc's find_program(clang ...),
+        # llvm-link, opt all resolve to our shipped binaries — most robust
+        # way to steer libclc without guessing its exact CMake variable names.
+        (cd "$LIBCLC_BUILD" && \
+            PATH="$NATIVE_BIN:$PATH" \
+            "$CMAKE" "$LLVM_BUILD/src/libclc" \
+                -DCMAKE_BUILD_TYPE=Release \
+                -DCMAKE_INSTALL_PREFIX="$LIBCLC_INSTALL" \
+                -DLIBCLC_TARGETS_TO_BUILD="spir--" \
+                -DLLVM_DIR="$LLVM_BUILD/lib/cmake/llvm" && \
+            PATH="$NATIVE_BIN:$PATH" \
+            "$CMAKE" --build . --config Release -j$NCPU && \
+            PATH="$NATIVE_BIN:$PATH" \
+            "$CMAKE" --install .)
+
+        # clspv looks for $CLSPV_EXTERNAL_LIBCLC_DIR/spir--/libclc.bc. libclc
+        # installs under <prefix>/share/clc/... with naming variants across
+        # LLVM versions (spir--.bc, spir--/libclc.bc, etc.). Find whatever
+        # got produced and arrange it at the path clspv expects.
+        LIBCLC_BC=$(find "$LIBCLC_INSTALL" -type f -name '*.bc' | head -1)
+        if [ -z "$LIBCLC_BC" ]; then
+            echo "Error: libclc build produced no .bc file; install tree:"
+            find "$LIBCLC_INSTALL" -type f
+            exit 1
+        fi
+        mkdir -p "$LIBCLC_INSTALL/spir--"
+        [ -f "$LIBCLC_INSTALL/spir--/libclc.bc" ] || cp "$LIBCLC_BC" "$LIBCLC_INSTALL/spir--/libclc.bc"
+        echo "libclc ready at: $LIBCLC_INSTALL/spir--/libclc.bc"
+    else
+        echo "Reusing cached libclc at: $LIBCLC_INSTALL/spir--/libclc.bc"
+    fi
+
+    LIBCLC_DIR="$LIBCLC_INSTALL"
+fi
+
 # Arrays (not strings) so $CMAKE with spaces (e.g. Git Bash resolving to
 # "/c/Program Files/CMake/bin/cmake.exe" when MSYS2 isn't installed on the
 # Windows runner) survives word-splitting at expansion time.
 if [ "$IS_WASM" -eq 1 ]; then
     CMAKE_CMD=(emcmake "$CMAKE")
     MAKE_CMD=(emmake "$CMAKE")
-    CLSPV_EXTRA="-DCLSPV_EXTERNAL_LIBCLC_DIR=${LIBCLC_DIR:-/tmp/dummy}"
+    CLSPV_EXTRA="-DCLSPV_EXTERNAL_LIBCLC_DIR=$LIBCLC_DIR"
 else
     CMAKE_CMD=("$CMAKE")
     MAKE_CMD=("$CMAKE")
