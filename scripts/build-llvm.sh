@@ -120,20 +120,24 @@ else
     fi
 fi
 
-# Bundle the LLVM/Clang source tree into the artifact so downstream
-# consumers (clspv, spirv-llvm-translator) can point CLSPV_LLVM_SOURCE_DIR
-# / CLANG_SOURCE_DIR at it. Skip heavy bits we don't need.
-echo "Bundling LLVM/Clang source tree into $PACKAGE_DIR/src..."
-mkdir -p "$PACKAGE_DIR/src/llvm" "$PACKAGE_DIR/src/clang"
-EXCLUDES=(
-    --exclude=test --exclude=unittests --exclude=docs
-    --exclude=examples --exclude=benchmarks --exclude=bindings
-    --exclude=.git
-)
+# Bundle the FULL llvm-project source tree into the artifact so downstream
+# consumers (clspv, spirv-llvm-translator) can reference any file they need.
+# LLVM is a monorepo with heavy cross-subtree dependencies — clspv alone
+# touches llvm/, clang/, cmake/, third-party/ (SipHash), runtimes/ and the
+# add_subdirectory() graph reaches into test/, examples/, unittests/, etc.
+# Earlier attempts to prune heavy bits (test/, examples/, docs/...) triggered
+# cascading "missing directory" failures. Bundle everything minus .git and
+# build outputs; let CMake flags decide what actually gets built.
+#
 # common.sh normalizes $OUTPUT_DIR (and therefore $PACKAGE_DIR) to POSIX form
 # on MSYS2 via cygpath, so no drive-letter colons reach tar's path parser here.
-tar -cf - "${EXCLUDES[@]}" -C ../llvm . | tar -xf - -C "$PACKAGE_DIR/src/llvm"
-tar -cf - "${EXCLUDES[@]}" -C ../clang . | tar -xf - -C "$PACKAGE_DIR/src/clang"
+echo "Bundling full llvm-project source tree into $PACKAGE_DIR/src..."
+mkdir -p "$PACKAGE_DIR/src"
+tar -cf - \
+    --exclude=.git \
+    --exclude=build \
+    --exclude=build-native \
+    -C .. . | tar -xf - -C "$PACKAGE_DIR/src"
 
 # Record the LLVM tag we built so consumers can verify version match
 if [ -d "../.git" ]; then

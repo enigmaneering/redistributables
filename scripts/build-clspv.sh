@@ -25,14 +25,16 @@ if [ ! -d "$LLVM_BUILD/src/llvm" ] || [ ! -d "$LLVM_BUILD/src/clang" ]; then
 fi
 echo "Using llvm from: $LLVM_BUILD"
 
-# clspv pulls LLVM's source CMakeLists.txt, which does `include(../cmake/...)`
-# relative to llvm/. The LLVM artifact only bundles llvm/ and clang/ under src/
-# (to keep the cached artifact small) — fetch the sibling top-level cmake/ tree
-# here at the tag recorded in VERSION. This does NOT touch build-llvm.sh, so
-# the cached LLVM artifacts remain valid.
-if [ ! -d "$LLVM_BUILD/src/cmake" ]; then
+# clspv pulls LLVM's source CMakeLists.txt, which needs sibling directories
+# of llvm/ (cmake/, third-party/) that the LLVM artifact doesn't bundle to
+# keep it small. Fetch them here at the tag recorded in VERSION. This does
+# NOT touch build-llvm.sh, so the cached LLVM artifacts remain valid.
+#   - cmake/        — LLVM's shared cmake modules (included via ../cmake/...)
+#   - third-party/  — vendored sources (e.g. siphash/SipHash.h for
+#                     LLVMSupport, unittest/ for gtest when tests enabled)
+if [ ! -d "$LLVM_BUILD/src/cmake" ] || [ ! -d "$LLVM_BUILD/src/third-party" ]; then
     if [ ! -f "$LLVM_BUILD/VERSION" ]; then
-        echo "Error: $LLVM_BUILD/VERSION missing; can't determine LLVM tag for cmake/ fetch"
+        echo "Error: $LLVM_BUILD/VERSION missing; can't determine LLVM tag for sibling fetch"
         exit 1
     fi
     LLVM_TAG="$(head -n1 "$LLVM_BUILD/VERSION" | tr -d '\r\n ')"
@@ -40,14 +42,15 @@ if [ ! -d "$LLVM_BUILD/src/cmake" ]; then
         echo "Error: $LLVM_BUILD/VERSION is empty"
         exit 1
     fi
-    echo "Fetching LLVM top-level cmake/ at $LLVM_TAG..."
-    FETCH_DIR="$BUILD_DIR/llvm-cmake-fetch"
+    echo "Fetching LLVM sibling dirs (cmake/, third-party/) at $LLVM_TAG..."
+    FETCH_DIR="$BUILD_DIR/llvm-sibling-fetch"
     rm -rf "$FETCH_DIR"
     git -c advice.detachedHead=false clone --depth 1 --filter=blob:none \
         --no-checkout --branch "$LLVM_TAG" \
         https://github.com/llvm/llvm-project.git "$FETCH_DIR"
-    (cd "$FETCH_DIR" && git sparse-checkout set cmake && git checkout)
-    cp -r "$FETCH_DIR/cmake" "$LLVM_BUILD/src/cmake"
+    (cd "$FETCH_DIR" && git sparse-checkout set cmake third-party && git checkout)
+    [ ! -d "$LLVM_BUILD/src/cmake" ] && cp -r "$FETCH_DIR/cmake" "$LLVM_BUILD/src/cmake"
+    [ ! -d "$LLVM_BUILD/src/third-party" ] && cp -r "$FETCH_DIR/third-party" "$LLVM_BUILD/src/third-party"
     rm -rf "$FETCH_DIR"
 fi
 
@@ -63,7 +66,6 @@ project(stub LANGUAGES NONE)
 '
 for stub in \
     runtimes \
-    third-party/unittest \
     clang/examples \
     clang/unittests \
     clang/test \
