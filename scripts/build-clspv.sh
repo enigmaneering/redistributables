@@ -25,6 +25,32 @@ if [ ! -d "$LLVM_BUILD/src/llvm" ] || [ ! -d "$LLVM_BUILD/src/clang" ]; then
 fi
 echo "Using llvm from: $LLVM_BUILD"
 
+# clspv pulls LLVM's source CMakeLists.txt, which does `include(../cmake/...)`
+# relative to llvm/. The LLVM artifact only bundles llvm/ and clang/ under src/
+# (to keep the cached artifact small) — fetch the sibling top-level cmake/ tree
+# here at the tag recorded in VERSION. This does NOT touch build-llvm.sh, so
+# the cached LLVM artifacts remain valid.
+if [ ! -d "$LLVM_BUILD/src/cmake" ]; then
+    if [ ! -f "$LLVM_BUILD/VERSION" ]; then
+        echo "Error: $LLVM_BUILD/VERSION missing; can't determine LLVM tag for cmake/ fetch"
+        exit 1
+    fi
+    LLVM_TAG="$(head -n1 "$LLVM_BUILD/VERSION" | tr -d '\r\n ')"
+    if [ -z "$LLVM_TAG" ]; then
+        echo "Error: $LLVM_BUILD/VERSION is empty"
+        exit 1
+    fi
+    echo "Fetching LLVM top-level cmake/ at $LLVM_TAG..."
+    FETCH_DIR="$BUILD_DIR/llvm-cmake-fetch"
+    rm -rf "$FETCH_DIR"
+    git -c advice.detachedHead=false clone --depth 1 --filter=blob:none \
+        --no-checkout --branch "$LLVM_TAG" \
+        https://github.com/llvm/llvm-project.git "$FETCH_DIR"
+    (cd "$FETCH_DIR" && git sparse-checkout set cmake && git checkout)
+    cp -r "$FETCH_DIR/cmake" "$LLVM_BUILD/src/cmake"
+    rm -rf "$FETCH_DIR"
+fi
+
 mkdir -p "$BUILD_DIR"
 cd "$BUILD_DIR"
 
@@ -66,6 +92,7 @@ fi
 
 "${CMAKE_CMD[@]}" .. \
     $CMAKE_GENERATOR \
+    $CMAKE_OSX_ARCH_FLAG \
     -DCMAKE_BUILD_TYPE=Release \
     -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
     -DCLSPV_LLVM_SOURCE_DIR="$LLVM_BUILD/src/llvm" \

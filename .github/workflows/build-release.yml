@@ -615,8 +615,10 @@ jobs:
         include:
           - runner: macos-14
             platform: darwin-arm64
+            macos_arch: arm64
           - runner: macos-14
             platform: darwin-amd64
+            macos_arch: x86_64
           - runner: ubuntu-latest
             platform: linux-amd64
           - runner: ubuntu-24.04-arm
@@ -661,6 +663,7 @@ jobs:
           OUTPUT_DIR="${{ runner.temp }}/output" \
           LLVM_BUILD_DIR="$(pwd)/llvm-${{ matrix.platform }}" \
           WASM_BUILD="${{ matrix.wasm && '1' || '0' }}" \
+          MACOS_ARCH="${{ matrix.macos_arch || '' }}" \
           MENTAL_PLATFORM="${{ matrix.platform }}" bash scripts/build-clspv.sh
 
       - name: Upload artifact
@@ -678,8 +681,10 @@ jobs:
         include:
           - runner: macos-14
             platform: darwin-arm64
+            macos_arch: arm64
           - runner: macos-14
             platform: darwin-amd64
+            macos_arch: x86_64
           - runner: ubuntu-latest
             platform: linux-amd64
           - runner: ubuntu-24.04-arm
@@ -718,6 +723,7 @@ jobs:
           OUTPUT_DIR="${{ runner.temp }}/output" \
           LLVM_BUILD_DIR="$(pwd)/llvm-${{ matrix.platform }}" \
           WASM_BUILD="${{ matrix.wasm && '1' || '0' }}" \
+          MACOS_ARCH="${{ matrix.macos_arch || '' }}" \
           MENTAL_PLATFORM="${{ matrix.platform }}" bash scripts/build-spirv-llvm-translator.sh
 
       - name: Upload artifact

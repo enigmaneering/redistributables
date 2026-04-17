@@ -48,6 +48,7 @@ fi
 
 "${CMAKE_CMD[@]}" .. \
     $CMAKE_GENERATOR \
+    $CMAKE_OSX_ARCH_FLAG \
     -DCMAKE_BUILD_TYPE=Release \
     -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
     -DLLVM_DIR="$LLVM_BUILD/lib/cmake/llvm" \
