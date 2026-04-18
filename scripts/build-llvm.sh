@@ -101,14 +101,18 @@ if [ "$IS_WASM" -eq 1 ]; then
         -DLLVM_ENABLE_ZSTD=OFF \
         -DLLVM_ENABLE_ZLIB=OFF
 
-    # Native tools: tablegen/llvm-config for Phase 2 cross-compile,
-    # clang/llvm-as/llvm-link/opt/llvm-config to bundle into the artifact
-    # for downstream consumers. libclc's CMake (libclc/CMakeLists.txt:137)
-    # requires this exact set of four tools — clang opt llvm-as llvm-link —
-    # and refuses to configure if any is missing.
+    # Native tools: tablegen/llvm-config for Phase 2 cross-compile, plus a
+    # broader set bundled into the artifact for downstream consumers.
+    # libclc's CLC language (commit 121f5a96ff38 onward) invokes
+    # find_llvm_tool for an expanding set of binaries — we've seen it
+    # demand clang, opt, llvm-as, llvm-link, llvm-ar so far. Ship the
+    # common LLVM binutils set proactively so future additions in this
+    # pipeline don't cost another multi-hour cache invalidation.
     $CMAKE --build . --config Release \
         --target llvm-min-tblgen llvm-tblgen clang-tblgen llvm-config \
                  clang llvm-as llvm-link opt \
+                 llvm-ar llvm-dis llvm-nm llvm-objcopy llvm-objdump \
+                 llvm-ranlib llvm-readobj llvm-strip \
         -j$NCPU
 
     NATIVE_TOOLS_DIR="$(pwd)/bin"
@@ -186,9 +190,8 @@ if [ "$IS_WASM" -eq 1 ]; then
     mkdir -p "$NATIVE_PREFIX/bin"
     # The real clang binary is clang-<major>; clang and clang++ are symlinks
     # to it. Copy the real binary + preserve any clang* symlinks so invoking
-    # "clang" or "clang++" from native/bin/ resolves correctly. Include:
-    #   - libclc's required tool chain: llvm-as, llvm-link, opt
-    #   - llvm-config for version queries
+    # "clang" or "clang++" from native/bin/ resolves correctly. Ship:
+    #   - clang/clang++ (compilation)
     #   - tablegen tools (llvm-min-tblgen, llvm-tblgen, clang-tblgen) so
     #     downstream wasm cross-compiles (clspv) can pass them via
     #     LLVM_TABLEGEN/CLANG_TABLEGEN and skip building their own NATIVE
@@ -196,15 +199,28 @@ if [ "$IS_WASM" -eq 1 ]; then
     #     by emmake's inherited em++ env → produces Emscripten JS binaries
     #     that run under Node's MEMFS → can't see host filesystem files
     #     like AArch64.td.
+    #   - llvm-config (version/flag queries)
+    #   - common LLVM binutils (ar, as, dis, link, nm, objcopy, objdump,
+    #     opt, ranlib, readobj, strip) — libclc's CLC language calls
+    #     find_llvm_tool on a growing set of these, and we'd rather ship
+    #     them proactively than eat another cache invalidation per tool.
     for f in "$NATIVE_TOOLS_DIR"/clang "$NATIVE_TOOLS_DIR"/clang-[0-9]* \
              "$NATIVE_TOOLS_DIR"/clang++ \
-             "$NATIVE_TOOLS_DIR"/llvm-as \
-             "$NATIVE_TOOLS_DIR"/llvm-link \
-             "$NATIVE_TOOLS_DIR"/opt \
              "$NATIVE_TOOLS_DIR"/llvm-config \
              "$NATIVE_TOOLS_DIR"/llvm-min-tblgen \
              "$NATIVE_TOOLS_DIR"/llvm-tblgen \
-             "$NATIVE_TOOLS_DIR"/clang-tblgen; do
+             "$NATIVE_TOOLS_DIR"/clang-tblgen \
+             "$NATIVE_TOOLS_DIR"/llvm-ar \
+             "$NATIVE_TOOLS_DIR"/llvm-as \
+             "$NATIVE_TOOLS_DIR"/llvm-dis \
+             "$NATIVE_TOOLS_DIR"/llvm-link \
+             "$NATIVE_TOOLS_DIR"/llvm-nm \
+             "$NATIVE_TOOLS_DIR"/llvm-objcopy \
+             "$NATIVE_TOOLS_DIR"/llvm-objdump \
+             "$NATIVE_TOOLS_DIR"/llvm-ranlib \
+             "$NATIVE_TOOLS_DIR"/llvm-readobj \
+             "$NATIVE_TOOLS_DIR"/llvm-strip \
+             "$NATIVE_TOOLS_DIR"/opt; do
         [ -e "$f" ] && cp -P "$f" "$NATIVE_PREFIX/bin/"
     done
     # Clang looks up its builtin headers (stddef.h, stdint.h, opencl-c.h, ...)
