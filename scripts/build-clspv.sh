@@ -154,10 +154,18 @@ if [ "$IS_WASM" -eq 1 ]; then
         # overwrites it. libclc has a purpose-built override hook:
         # LIBCLC_CUSTOM_LLVM_TOOLS_BINARY_DIR bypasses the find_package
         # path and does NO_DEFAULT_PATH find_program in our dir instead.
+        #
+        # libclc also enable_language(CLC) (commit 121f5a96ff38 introduced
+        # this), which refuses to proceed unless CMAKE_C_COMPILER is clang.
+        # Ubuntu's default /usr/bin/cc is gcc, so we must override to our
+        # bundled native clang. Same for CXX — both land in the same CLC
+        # toolchain probe.
         (cd "$LIBCLC_BUILD" && \
             "$CMAKE" "$LLVM_BUILD/src/libclc" \
                 -DCMAKE_BUILD_TYPE=Release \
                 -DCMAKE_INSTALL_PREFIX="$LIBCLC_INSTALL" \
+                -DCMAKE_C_COMPILER="$NATIVE_BIN/clang" \
+                -DCMAKE_CXX_COMPILER="$NATIVE_BIN/clang++" \
                 -DLIBCLC_TARGETS_TO_BUILD="clspv--;clspv64--" \
                 -DLLVM_DIR="$LLVM_BUILD/lib/cmake/llvm" \
                 -DLIBCLC_CUSTOM_LLVM_TOOLS_BINARY_DIR="$NATIVE_BIN" && \
