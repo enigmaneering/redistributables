@@ -135,15 +135,25 @@ if [ "$IS_WASM" -eq 1 ]; then
     mkdir -p "$NATIVE_PREFIX/bin"
     # The real clang binary is clang-<major>; clang and clang++ are symlinks
     # to it. Copy the real binary + preserve any clang* symlinks so invoking
-    # "clang" or "clang++" from native/bin/ resolves correctly. Include the
-    # rest of libclc's required tool chain (llvm-as, llvm-link, opt) plus
-    # llvm-config for version queries.
+    # "clang" or "clang++" from native/bin/ resolves correctly. Include:
+    #   - libclc's required tool chain: llvm-as, llvm-link, opt
+    #   - llvm-config for version queries
+    #   - tablegen tools (llvm-min-tblgen, llvm-tblgen, clang-tblgen) so
+    #     downstream wasm cross-compiles (clspv) can pass them via
+    #     LLVM_TABLEGEN/CLANG_TABLEGEN and skip building their own NATIVE
+    #     sub-tree. Without these, clspv's "NATIVE" sub-build gets compiled
+    #     by emmake's inherited em++ env → produces Emscripten JS binaries
+    #     that run under Node's MEMFS → can't see host filesystem files
+    #     like AArch64.td.
     for f in "$NATIVE_TOOLS_DIR"/clang "$NATIVE_TOOLS_DIR"/clang-[0-9]* \
              "$NATIVE_TOOLS_DIR"/clang++ \
              "$NATIVE_TOOLS_DIR"/llvm-as \
              "$NATIVE_TOOLS_DIR"/llvm-link \
              "$NATIVE_TOOLS_DIR"/opt \
-             "$NATIVE_TOOLS_DIR"/llvm-config; do
+             "$NATIVE_TOOLS_DIR"/llvm-config \
+             "$NATIVE_TOOLS_DIR"/llvm-min-tblgen \
+             "$NATIVE_TOOLS_DIR"/llvm-tblgen \
+             "$NATIVE_TOOLS_DIR"/clang-tblgen; do
         [ -e "$f" ] && cp -P "$f" "$NATIVE_PREFIX/bin/"
     done
     # Clang looks up its builtin headers (stddef.h, stdint.h, opencl-c.h, ...)

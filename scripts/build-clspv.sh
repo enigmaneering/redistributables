@@ -115,31 +115,18 @@ cd build
 # via CLSPV_EXTERNAL_LIBCLC_DIR.
 if [ "$IS_WASM" -eq 1 ]; then
     NATIVE_BIN="$LLVM_BUILD/native/bin"
-    # libclc requires this exact set (libclc/CMakeLists.txt:137).
-    for tool in clang llvm-as llvm-link opt; do
+    # libclc (libclc/CMakeLists.txt:137) requires clang/opt/llvm-as/llvm-link.
+    # clspv's cross-compile needs tablegens (llvm-min-tblgen, llvm-tblgen,
+    # clang-tblgen) passed explicitly — otherwise LLVM's CrossCompile.cmake
+    # spawns a "NATIVE" sub-build which inherits emmake's em++ and produces
+    # Emscripten modules unable to see the host filesystem.
+    for tool in clang llvm-as llvm-link opt llvm-min-tblgen llvm-tblgen clang-tblgen; do
         if [ ! -x "$NATIVE_BIN/$tool" ]; then
             echo "Error: native $tool not found at $NATIVE_BIN/"
             echo "build-llvm.sh must bundle native tools (Phase 1 output) for WASM"
             exit 1
         fi
     done
-
-    # Integrity check on the LLVM artifact's source bundle. clspv's build
-    # references TD files from CLSPV_LLVM_SOURCE_DIR via tablegen; if any
-    # are missing the build fails mid-compile with a cryptic tablegen
-    # "Could not open input file" error. Surface it here instead.
-    for required in \
-        "src/llvm/lib/Target/AArch64/AArch64.td" \
-        "src/llvm/lib/Target/X86/X86.td" \
-        "src/llvm/include/llvm/IR/Intrinsics.td"; do
-        if [ ! -f "$LLVM_BUILD/$required" ]; then
-            echo "Error: LLVM artifact is missing $required"
-            echo "Contents of $LLVM_BUILD/src/llvm/lib/Target/ (first 20):"
-            ls "$LLVM_BUILD/src/llvm/lib/Target/" 2>&1 | head -20
-            exit 1
-        fi
-    done
-    echo "LLVM artifact integrity check passed."
     if [ ! -d "$LLVM_BUILD/src/libclc" ]; then
         echo "Error: libclc source not found at $LLVM_BUILD/src/libclc"
         echo "build-llvm.sh must bundle the full llvm-project source tree"
@@ -197,40 +184,6 @@ if [ "$IS_WASM" -eq 1 ]; then
     fi
 
     LIBCLC_DIR="$LIBCLC_INSTALL"
-
-    # Diagnostic: verify the LLVM source tree is still intact after libclc
-    # prep. On a previous run the clspv tablegen step failed 10 min later
-    # with "Could not open input file ...AArch64.td" despite the file being
-    # confirmed present at the start of this script. Narrow the window.
-    if [ ! -f "$LLVM_BUILD/src/llvm/lib/Target/AArch64/AArch64.td" ]; then
-        echo "DIAGNOSTIC: AArch64.td disappeared during libclc prep!"
-        ls -la "$LLVM_BUILD/src/llvm/lib/Target/AArch64/" 2>&1 | head -5
-        exit 1
-    fi
-    echo "DIAGNOSTIC (post-libclc): AArch64.td still present."
-
-    # Background watcher: log the exact instant AArch64.td is removed.
-    # (In the last diagnostic run the watcher stayed silent — file never
-    # disappeared — yet tablegen still errored with "No such file". Keeping
-    # the watcher for belt-and-braces; the new lever is VERBOSE_MAKEFILE
-    # below to reveal the exact tablegen invocation.)
-    TARGET_TD="$LLVM_BUILD/src/llvm/lib/Target/AArch64/AArch64.td"
-    (
-        while [ -f "$TARGET_TD" ]; do sleep 1; done
-        printf 'WATCHER: %s gone at %s\n' "$TARGET_TD" "$(date +%T.%N)"
-        ls -la "$LLVM_BUILD/src/llvm/lib/Target/AArch64/" 2>&1 | head -10
-    ) &
-    TD_WATCHER_PID=$!
-
-    # On script exit (success or failure), dump the file's actual state so
-    # we can confirm whether it's present-but-inaccessible at failure time.
-    trap '
-        echo "=== EXIT TRAP: AArch64.td state at script exit ==="
-        ls -la "'"$TARGET_TD"'" 2>&1 || true
-        stat "'"$TARGET_TD"'" 2>&1 || true
-        head -3 "'"$TARGET_TD"'" 2>&1 | head -3 || true
-        kill $TD_WATCHER_PID 2>/dev/null
-    ' EXIT
 fi
 
 # Arrays (not strings) so $CMAKE with spaces (e.g. Git Bash resolving to
@@ -239,7 +192,15 @@ fi
 if [ "$IS_WASM" -eq 1 ]; then
     CMAKE_CMD=(emcmake "$CMAKE")
     MAKE_CMD=(emmake "$CMAKE")
-    CLSPV_EXTRA="-DCLSPV_EXTERNAL_LIBCLC_DIR=$LIBCLC_DIR"
+    # Feed clspv the pre-built native tablegens and native tool dir so LLVM's
+    # CrossCompile.cmake skips its NATIVE sub-build. Without these, that
+    # sub-build inherits emmake's em++ and produces Emscripten tools that
+    # can't see host files (see build-llvm.sh's native bundle comment).
+    CLSPV_EXTRA="-DCLSPV_EXTERNAL_LIBCLC_DIR=$LIBCLC_DIR \
+        -DLLVM_TABLEGEN=$NATIVE_BIN/llvm-tblgen \
+        -DCLANG_TABLEGEN=$NATIVE_BIN/clang-tblgen \
+        -DLLVM_CONFIG_PATH=$NATIVE_BIN/llvm-config \
+        -DLLVM_NATIVE_TOOL_DIR=$NATIVE_BIN"
 else
     CMAKE_CMD=("$CMAKE")
     MAKE_CMD=("$CMAKE")
@@ -251,7 +212,6 @@ fi
     $CMAKE_OSX_ARCH_FLAG \
     -DCMAKE_BUILD_TYPE=Release \
     -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
-    -DCMAKE_VERBOSE_MAKEFILE=ON \
     -DCLSPV_LLVM_SOURCE_DIR="$LLVM_BUILD/src/llvm" \
     -DCLSPV_CLANG_SOURCE_DIR="$LLVM_BUILD/src/clang" \
     -DCLSPV_LLVM_BINARY_DIR="$LLVM_BUILD" \
