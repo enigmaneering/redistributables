@@ -45,10 +45,12 @@ if [ ! -d "$LLVM_BUILD/src/cmake" ] || [ ! -d "$LLVM_BUILD/src/third-party" ]; t
     echo "Fetching LLVM sibling dirs (cmake/, third-party/) at $LLVM_TAG..."
     FETCH_DIR="$BUILD_DIR/llvm-sibling-fetch"
     rm -rf "$FETCH_DIR"
-    git -c advice.detachedHead=false clone --depth 1 --filter=blob:none \
-        --no-checkout --branch "$LLVM_TAG" \
-        https://github.com/llvm/llvm-project.git "$FETCH_DIR"
-    (cd "$FETCH_DIR" && git sparse-checkout set cmake third-party && git checkout)
+    # $LLVM_TAG is now a commit SHA (build-llvm.sh pins to clspv's pinned
+    # commit), not a branch/tag name. Use codeload tarball instead of git
+    # clone so we don't need to resolve the SHA as a ref.
+    curl -sSLf "https://codeload.github.com/llvm/llvm-project/tar.gz/$LLVM_TAG" | \
+        tar -xz -C "$BUILD_DIR" && \
+        mv "$BUILD_DIR/llvm-project-$LLVM_TAG" "$FETCH_DIR"
     [ ! -d "$LLVM_BUILD/src/cmake" ] && cp -r "$FETCH_DIR/cmake" "$LLVM_BUILD/src/cmake"
     [ ! -d "$LLVM_BUILD/src/third-party" ] && cp -r "$FETCH_DIR/third-party" "$LLVM_BUILD/src/third-party"
     rm -rf "$FETCH_DIR"

@@ -14,12 +14,49 @@ if [ -z "$CMAKE" ]; then echo "Error: cmake not found"; exit 1; fi
 mkdir -p "$BUILD_DIR"
 cd "$BUILD_DIR"
 
-# Clone latest stable release
-if [ ! -d "llvm-project" ]; then
+# Resolve which LLVM commit to build. Policy: track whatever clspv pins in
+# its deps.json. clspv tracks LLVM main (no stable tags), uses bleeding-edge
+# intrinsics, and drives the rest of our cross-compile stack (spirv-llvm-
+# translator also tracks main to match). Pinning to clspv keeps the whole
+# chain coherent without us manually bumping versions — when clspv updates
+# deps.json we pick up the new SHA on the next build.
+#
+# Resolution order:
+#   1. $LLVM_SHA env var (set by CI; exposed to the cache key so bumps
+#      invalidate correctly)
+#   2. clspv's deps.json (for local dev — same source CI consults)
+#   3. latest llvmorg-* release tag (last-resort fallback)
+if [ -z "$LLVM_TAG" ]; then LLVM_TAG="$LLVM_SHA"; fi
+if [ -z "$LLVM_TAG" ] && [ -n "$PYTHON" ]; then
+    echo "Resolving LLVM SHA from clspv's deps.json..."
+    LLVM_TAG=$(curl -sSLf https://raw.githubusercontent.com/google/clspv/main/deps.json \
+        | "$PYTHON" -c 'import json,sys; d=json.load(sys.stdin); print(next(c["commit"] for c in d["commits"] if c["name"]=="llvm"))' \
+        2>/dev/null || true)
+fi
+if [ -z "$LLVM_TAG" ]; then
+    echo "deps.json fetch failed; falling back to latest llvmorg release tag"
     LLVM_TAG=$(curl -s https://api.github.com/repos/llvm/llvm-project/releases/latest | grep '"tag_name"' | sed -E 's/.*"tag_name": "([^"]+)".*/\1/')
-    if [ -z "$LLVM_TAG" ]; then LLVM_TAG="llvmorg-22.1.3"; fi
-    echo "Cloning LLVM $LLVM_TAG..."
-    git clone --depth 1 --branch "$LLVM_TAG" https://github.com/llvm/llvm-project.git
+fi
+if [ -z "$LLVM_TAG" ]; then
+    echo "Error: could not determine LLVM version to build"; exit 1
+fi
+if [ ! -d "llvm-project" ]; then
+    echo "Cloning LLVM at $LLVM_TAG..."
+    # Git doesn't support `--depth 1` directly targeting an arbitrary SHA
+    # via --branch. Download the GitHub-hosted tarball instead — much
+    # faster than cloning metadata history (llvm-project's main has
+    # hundreds of thousands of commits) and gives us just the tree at
+    # the SHA. Downstream steps don't need .git (the VERSION file
+    # fallback in this script uses $LLVM_TAG directly when no .git exists).
+    curl -sSLf "https://codeload.github.com/llvm/llvm-project/tar.gz/$LLVM_TAG" | tar -xz
+    # Tarball unpack dir: "llvm-project-<ref>" where <ref> is the SHA or tag
+    # exactly as passed to codeload. Find-and-rename handles both shapes.
+    UNPACK_DIR=$(ls -d llvm-project-* 2>/dev/null | head -1)
+    if [ -z "$UNPACK_DIR" ]; then
+        echo "Error: codeload tarball did not produce a llvm-project-* directory"
+        exit 1
+    fi
+    mv "$UNPACK_DIR" llvm-project
 fi
 
 # Verify license
@@ -196,10 +233,9 @@ tar -cf - \
     --exclude=build-native \
     -C .. . | tar -xf - -C "$PACKAGE_DIR/src"
 
-# Record the LLVM tag we built so consumers can verify version match
-if [ -d "../.git" ]; then
-    (cd .. && git describe --tags 2>/dev/null || git rev-parse HEAD) > "$PACKAGE_DIR/VERSION"
-fi
+# Record the LLVM commit we built so consumers can verify version match.
+# We clone-by-tarball now (no .git), so just write the pinned SHA directly.
+echo "$LLVM_TAG" > "$PACKAGE_DIR/VERSION"
 
 # License
 mkdir -p "$PACKAGE_DIR/LICENSES"
