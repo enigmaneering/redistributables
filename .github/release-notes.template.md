@@ -1,32 +1,12 @@
-# Shader Compilation Toolchain __VERSION__
+<picture>
+    <source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/enigmaneering/assets/refs/heads/main/redistributables/redistributables_light.png">
+    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/enigmaneering/assets/refs/heads/main/redistributables/redistributables_dark.png">
+    <img alt="redistributables logo" src="https://raw.githubusercontent.com/enigmaneering/assets/refs/heads/main/redistributables/redistributables_light.png" >
+</picture>
 
-Complete cross-platform shader compilation toolchain with support for GLSL, HLSL, WGSL, and SPIRV. Pre-built binaries for all supported platforms.
+# `__VERSION__`
 
-## 🚀 Quick Start
-
-### Automated Installation (Recommended)
-
-Use the [`fetch` CLI tool](https://git.enigmaneering.org/enigmaneering/external/releases/tag/__GPU_VERSION__) or [Go module](https://git.enigmaneering.org/enigmaneering/external/tree/main/go/fetch) for automatic installation:
-
-```bash
-# Download fetch CLI from the go/fetch release
-# See: https://git.enigmaneering.org/enigmaneering/external/releases/tag/__GPU_VERSION__
-
-./fetch  # Automatically downloads and installs this version
-```
-
-Or use the Go module:
-
-```go
-import "git.enigmaneering.org/redistributables/go/fetch/gpu"
-
-func main() {
-    // Automatically downloads latest toolchain to ./external/
-    if err := gpu.EnsureLibraries(); err != nil {
-        log.Fatal(err)
-    }
-}
-```
+Complete cross-platform shader compilation toolchain with support for GLSL, HLSL, WGSL, SPIR-V, OpenCL, and CUDA. Pre-built binaries for all supported platforms.
 
 ## 🛠️ Included Tools
 
@@ -52,22 +32,11 @@ All binaries are provided for the following platforms:
 - ✅ Windows x86_64
 - ✅ Windows ARM64
 
-## 📦 Manual Installation
-
-Download the appropriate `.tar.gz` (Unix) or `.zip` (Windows) archives for your platform and extract them to your project's `external/` directory.
-
 Each tool is packaged separately:
 - `glslang-{platform}.tar.gz` / `.zip`
 - `spirv-cross-{platform}.tar.gz` / `.zip`
 - `naga-{platform}.tar.gz` / `.zip`
 - `wgpu-{platform}.tar.gz`
-
-## 🔄 Version Management
-
-When using the fetch tool or Go module:
-- **`.version`** file tracks the installed version
-- **`FREEZE`** file prevents automatic updates (create manually to pin version)
-- Automatic upgrade detection
 
 ## 📝 License
 

@@ -82,8 +82,24 @@ else
     find lib -name "libLLVMSPIRVLib*.so*" | while read f; do cp -P "$f" "$PACKAGE_DIR/lib/"; done
 fi
 
-cp -r ../include/LLVMSPIRVLib.h "$PACKAGE_DIR/include/" 2>/dev/null || true
-cp -r ../include/LLVMSPIRVLib "$PACKAGE_DIR/include/" 2>/dev/null || true
+# Ship every public header SPIRV-LLVM-Translator exposes.  Upstream places
+# them flat under include/ (not in a subdir), and LLVMSPIRVLib.h transitively
+# needs both LLVMSPIRVOpts.h AND the LLVMSPIRVExtensions.inc it #includes.
+# A prior version globbed a non-existent "include/LLVMSPIRVLib/" directory
+# with "|| true", silently shipping only LLVMSPIRVLib.h and breaking any
+# downstream that actually #include'd the header.
+cp ../include/*.h ../include/*.inc "$PACKAGE_DIR/include/"
+
+# Canary: confirm the three headers downstream compiles require all landed.
+# Fail loud — silent packaging gaps are the whole reason this check exists.
+for required in LLVMSPIRVLib.h LLVMSPIRVOpts.h LLVMSPIRVExtensions.inc; do
+    if [ ! -f "$PACKAGE_DIR/include/$required" ]; then
+        echo "Error: required header $required missing from package" >&2
+        echo "       upstream include/ contained:" >&2
+        ls -1 ../include/ >&2
+        exit 1
+    fi
+done
 
 cp ../LICENSE.TXT "$PACKAGE_DIR/LICENSE.TXT"
 

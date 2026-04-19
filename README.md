@@ -4,7 +4,8 @@
     <img alt="redistributables logo" src="https://raw.githubusercontent.com/enigmaneering/assets/refs/heads/main/redistributables/redistributables_light.png" >
 </picture>
 
-Pre-built shader compilation and GPU compute toolchain for [libmental](https://git.enigmaneering.org/enigmaneering/mental). All tools are faithful upstream builds across 7 targets (6 native + WebAssembly).
+This repository releases pre-built tools for [libmental](https://git.enigmaneering.org/enigmaneering/mental). All tools are as faithful of upstream builds as possible
+across 7 targets (6 native + WebAssembly).
 
 ## Tools
 
