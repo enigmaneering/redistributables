@@ -151,13 +151,23 @@ if [ "$IS_WASM" -eq 1 ]; then
         # via LLVM_RUNTIMES_TARGET. To get both 32-bit and 64-bit bitcode
         # we do TWO configure + build + install cycles, one per triple.
         #
-        # Other quirks handled here:
-        # - find_package(LLVM) sets LLVM_TOOLS_BINARY_DIR from LLVMConfig
-        #   (pointing at the WASM install's non-executable bin/). libclc
-        #   has a purpose-built override: LIBCLC_CUSTOM_LLVM_TOOLS_BINARY_DIR
-        #   bypasses that and does NO_DEFAULT_PATH find_program on our dir.
-        # - enable_language(CLC) requires CMAKE_C_COMPILER to be clang;
-        #   Ubuntu's default /usr/bin/cc is gcc. Point at our native clang.
+        # Tool discovery in this libclc version splits two ways:
+        # - enable_language(CLC) via CMakeCLCInformation.cmake: calls
+        #   find_llvm_tool(llvm-ar ...) and (llvm-ranlib ...) relative to
+        #   CMAKE_CLC_COMPILER's parent dir. Pointing CMAKE_C_COMPILER at
+        #   our native clang implicitly directs CLC there too, and those
+        #   tools are in the same bin/, so that side "just works."
+        # - libclc/CMakeLists.txt standalone branch: calls find_program for
+        #   opt and llvm-link with PATHS=$LLVM_TOOLS_BINARY_DIR NO_DEFAULT_PATH.
+        #   LLVM_TOOLS_BINARY_DIR is set by find_package(LLVM) to the wasm
+        #   install's bin/ (non-executable .js/.wasm stubs — no plain 'opt'
+        #   file). The prior LIBCLC_CUSTOM_LLVM_TOOLS_BINARY_DIR escape hatch
+        #   was removed in this version. We preempt find_program instead:
+        #   pre-seeding LLVM_TOOL_opt / LLVM_TOOL_llvm-link as cache vars
+        #   makes find_program return the cached value without searching.
+        #
+        # Also: enable_language(CLC) requires CMAKE_C_COMPILER to be clang;
+        # Ubuntu's default /usr/bin/cc is gcc. We point at our native clang.
         for triple in clspv-- clspv64--; do
             LIBCLC_BUILD_PER="$LIBCLC_BUILD/$triple"
             mkdir -p "$LIBCLC_BUILD_PER"
@@ -169,7 +179,8 @@ if [ "$IS_WASM" -eq 1 ]; then
                     -DCMAKE_CXX_COMPILER="$NATIVE_BIN/clang++" \
                     -DLLVM_RUNTIMES_TARGET="$triple" \
                     -DLLVM_DIR="$LLVM_BUILD/lib/cmake/llvm" \
-                    -DLIBCLC_CUSTOM_LLVM_TOOLS_BINARY_DIR="$NATIVE_BIN" && \
+                    -DLLVM_TOOL_opt="$NATIVE_BIN/opt" \
+                    -DLLVM_TOOL_llvm-link="$NATIVE_BIN/llvm-link" && \
                 "$CMAKE" --build . --config Release -j$NCPU && \
                 "$CMAKE" --install .)
         done
