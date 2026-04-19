@@ -273,8 +273,26 @@ elif [[ "$OSTYPE" == "darwin"* ]]; then
     for d in "$PACKAGE_DIR/lib/"*.dylib; do
         install_name_tool -id "@rpath/$(basename "$d")" "$d" 2>/dev/null || true
     done
+elif [[ "$OSTYPE" == "msys" || "$OSTYPE" == "cygwin" || "$OSTYPE" == "win32" ]]; then
+    # MinGW shared-lib output is libclspv_core.dll + libclspv_core.dll.a
+    # (import lib). Copy both so downstream consumers can link + load.
+    # The prior linux-only find -name "*.so*" pattern missed these and
+    # produced empty Windows artifacts silently.
+    find . -name "libclspv_core*.dll" | while read f; do cp "$f" "$PACKAGE_DIR/lib/"; done
+    find . -name "libclspv_core*.dll.a" | while read f; do cp "$f" "$PACKAGE_DIR/lib/"; done
 else
     find . -name "libclspv_core*.so*" | while read f; do cp -P "$f" "$PACKAGE_DIR/lib/"; done
+fi
+
+# Sanity check: the artifact must actually contain libclspv_core.* — the
+# prior silent-empty-artifact state (Windows .dll missed by *.so* glob)
+# passed CI with a 0-byte clspv-*.tar.gz that only surfaced at release
+# upload. Fail here instead.
+if [ -z "$(ls -A "$PACKAGE_DIR/lib/" 2>/dev/null)" ]; then
+    echo "Error: no clspv core library was packaged for $PLATFORM."
+    echo "Build tree contents relevant to clspv_core:"
+    find . -name 'libclspv_core*' -o -name 'clspv_core*'
+    exit 1
 fi
 
 # Headers
