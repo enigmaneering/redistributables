@@ -146,36 +146,38 @@ if [ "$IS_WASM" -eq 1 ]; then
     if [ ! -f "$LIBCLC_INSTALL/spir--/libclc.bc" ] || [ ! -f "$LIBCLC_INSTALL/spir64--/libclc.bc" ]; then
         echo "=== WASM libclc prep: building clspv-- and clspv64-- bitcode ==="
         rm -rf "$LIBCLC_BUILD"
-        mkdir -p "$LIBCLC_BUILD"
-        # libclc's CMakeLists.txt (line 61+) does find_package(LLVM), which
-        # sets LLVM_TOOLS_BINARY_DIR from LLVMConfig.cmake — that points at
-        # the wasm install's bin/ (full of .js/.wasm stubs, not executables).
-        # Passing -DLLVM_TOOLS_BINARY_DIR=... doesn't help — find_package
-        # overwrites it. libclc has a purpose-built override hook:
-        # LIBCLC_CUSTOM_LLVM_TOOLS_BINARY_DIR bypasses the find_package
-        # path and does NO_DEFAULT_PATH find_program in our dir instead.
+        # libclc's CMake (commit 121f5a96ff38) changed from accepting a
+        # list via LIBCLC_TARGETS_TO_BUILD to a single target per configure
+        # via LLVM_RUNTIMES_TARGET. To get both 32-bit and 64-bit bitcode
+        # we do TWO configure + build + install cycles, one per triple.
         #
-        # libclc also enable_language(CLC) (commit 121f5a96ff38 introduced
-        # this), which refuses to proceed unless CMAKE_C_COMPILER is clang.
-        # Ubuntu's default /usr/bin/cc is gcc, so we must override to our
-        # bundled native clang. Same for CXX — both land in the same CLC
-        # toolchain probe.
-        (cd "$LIBCLC_BUILD" && \
-            "$CMAKE" "$LLVM_BUILD/src/libclc" \
-                -DCMAKE_BUILD_TYPE=Release \
-                -DCMAKE_INSTALL_PREFIX="$LIBCLC_INSTALL" \
-                -DCMAKE_C_COMPILER="$NATIVE_BIN/clang" \
-                -DCMAKE_CXX_COMPILER="$NATIVE_BIN/clang++" \
-                -DLIBCLC_TARGETS_TO_BUILD="clspv--;clspv64--" \
-                -DLLVM_DIR="$LLVM_BUILD/lib/cmake/llvm" \
-                -DLIBCLC_CUSTOM_LLVM_TOOLS_BINARY_DIR="$NATIVE_BIN" && \
-            "$CMAKE" --build . --config Release -j$NCPU && \
-            "$CMAKE" --install .)
+        # Other quirks handled here:
+        # - find_package(LLVM) sets LLVM_TOOLS_BINARY_DIR from LLVMConfig
+        #   (pointing at the WASM install's non-executable bin/). libclc
+        #   has a purpose-built override: LIBCLC_CUSTOM_LLVM_TOOLS_BINARY_DIR
+        #   bypasses that and does NO_DEFAULT_PATH find_program on our dir.
+        # - enable_language(CLC) requires CMAKE_C_COMPILER to be clang;
+        #   Ubuntu's default /usr/bin/cc is gcc. Point at our native clang.
+        for triple in clspv-- clspv64--; do
+            LIBCLC_BUILD_PER="$LIBCLC_BUILD/$triple"
+            mkdir -p "$LIBCLC_BUILD_PER"
+            (cd "$LIBCLC_BUILD_PER" && \
+                "$CMAKE" "$LLVM_BUILD/src/libclc" \
+                    -DCMAKE_BUILD_TYPE=Release \
+                    -DCMAKE_INSTALL_PREFIX="$LIBCLC_INSTALL" \
+                    -DCMAKE_C_COMPILER="$NATIVE_BIN/clang" \
+                    -DCMAKE_CXX_COMPILER="$NATIVE_BIN/clang++" \
+                    -DLLVM_RUNTIMES_TARGET="$triple" \
+                    -DLLVM_DIR="$LLVM_BUILD/lib/cmake/llvm" \
+                    -DLIBCLC_CUSTOM_LLVM_TOOLS_BINARY_DIR="$NATIVE_BIN" && \
+                "$CMAKE" --build . --config Release -j$NCPU && \
+                "$CMAKE" --install .)
+        done
 
         # Stage each built triple's .bc at the spir--/spir64-- path clspv
-        # hardcodes. libclc's install layout varies by version (could be
-        # <prefix>/share/clc/<triple>/libclc.bc, <triple>.bc, etc.) — match
-        # on the triple name anywhere in the installed path.
+        # hardcodes. libclc's install layout varies by version — match on
+        # the triple name anywhere in the installed path and copy whatever
+        # .bc it produced into the legacy path clspv still probes.
         for pair in "clspv--:spir--" "clspv64--:spir64--"; do
             SRC_TRIPLE="${pair%:*}"
             DST_TRIPLE="${pair#*:}"
