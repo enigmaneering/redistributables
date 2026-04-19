@@ -140,10 +140,15 @@ if [ "$IS_WASM" -eq 1 ]; then
     # clspv's cmake (clspv/cmake/CMakeLists.txt) hardcodes the lookup at
     #   $CLSPV_EXTERNAL_LIBCLC_DIR/spir--/libclc.bc        (32-bit)
     #   $CLSPV_EXTERNAL_LIBCLC_DIR/spir64--/libclc.bc      (64-bit)
-    # ...but LLVM 22.1.3 libclc retired the spir-- triples. The equivalent
-    # modern targets are clspv-- (32) / clspv64-- (64). Build both, then
-    # stage outputs at the spir--/spir64-- paths clspv still probes for.
-    if [ ! -f "$LIBCLC_INSTALL/spir--/libclc.bc" ] || [ ! -f "$LIBCLC_INSTALL/spir64--/libclc.bc" ]; then
+    # We build libclc with LLVM_RUNTIMES_TARGET=clspv--/clspv64-- (the
+    # modern build-time triples libclc accepts). libclc internally maps
+    # those to spir--/spir64-- in the install layout:
+    #   $LIBCLC_INSTALL/share/clc/spir--/libclc.bc
+    #   $LIBCLC_INSTALL/share/clc/spir64--/libclc.bc
+    # — exactly what clspv wants, so we set CLSPV_EXTERNAL_LIBCLC_DIR to
+    # $LIBCLC_INSTALL/share/clc and no renaming is needed.
+    LIBCLC_SHARE="$LIBCLC_INSTALL/share/clc"
+    if [ ! -f "$LIBCLC_SHARE/spir--/libclc.bc" ] || [ ! -f "$LIBCLC_SHARE/spir64--/libclc.bc" ]; then
         echo "=== WASM libclc prep: building clspv-- and clspv64-- bitcode ==="
         rm -rf "$LIBCLC_BUILD"
         # libclc's CMake (commit 121f5a96ff38) changed from accepting a
@@ -185,28 +190,22 @@ if [ "$IS_WASM" -eq 1 ]; then
                 "$CMAKE" --install .)
         done
 
-        # Stage each built triple's .bc at the spir--/spir64-- path clspv
-        # hardcodes. libclc's install layout varies by version — match on
-        # the triple name anywhere in the installed path and copy whatever
-        # .bc it produced into the legacy path clspv still probes.
-        for pair in "clspv--:spir--" "clspv64--:spir64--"; do
-            SRC_TRIPLE="${pair%:*}"
-            DST_TRIPLE="${pair#*:}"
-            SRC_BC=$(find "$LIBCLC_INSTALL" -type f -name '*.bc' -path "*${SRC_TRIPLE}*" | head -1)
-            if [ -z "$SRC_BC" ]; then
-                echo "Error: libclc did not produce bitcode for triple $SRC_TRIPLE. Install tree:"
+        # Verify libclc installed where we expect. If the layout changes
+        # in a future libclc bump, this surfaces the drift loudly.
+        for triple in spir-- spir64--; do
+            if [ ! -f "$LIBCLC_SHARE/$triple/libclc.bc" ]; then
+                echo "Error: libclc did not install $triple/libclc.bc under $LIBCLC_SHARE"
+                echo "Actual install tree:"
                 find "$LIBCLC_INSTALL" -type f
                 exit 1
             fi
-            mkdir -p "$LIBCLC_INSTALL/$DST_TRIPLE"
-            cp "$SRC_BC" "$LIBCLC_INSTALL/$DST_TRIPLE/libclc.bc"
-            echo "Staged $SRC_TRIPLE → $LIBCLC_INSTALL/$DST_TRIPLE/libclc.bc"
+            echo "Found $LIBCLC_SHARE/$triple/libclc.bc"
         done
     else
-        echo "Reusing cached libclc at: $LIBCLC_INSTALL/{spir--,spir64--}/libclc.bc"
+        echo "Reusing cached libclc at: $LIBCLC_SHARE/{spir--,spir64--}/libclc.bc"
     fi
 
-    LIBCLC_DIR="$LIBCLC_INSTALL"
+    LIBCLC_DIR="$LIBCLC_SHARE"
 fi
 
 # Arrays (not strings) so $CMAKE with spaces (e.g. Git Bash resolving to
