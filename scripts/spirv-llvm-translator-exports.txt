@@ -1,0 +1,38 @@
+# Exported-symbol whitelist for libLLVMSPIRVLib.dylib (darwin).
+# Consumed by `-Wl,-exported_symbols_list,<file>` during the shared-lib link.
+# See clspv-exports.txt for the full rationale.
+#
+# SPIRV-LLVM-Translator's public API is C++ and LIVES INSIDE the llvm::
+# namespace — unlike clspv which has its own tidy namespace.  That makes
+# this whitelist trickier: we need to export llvm::writeSpirv and friends
+# without exporting llvm::PassManager and friends.
+#
+# Strategy: export only llvm:: symbols whose mangled name contains
+# "Spirv" or "SPIRV" (everything the translator introduces), plus the
+# SPIRV:: namespace (helper classes like SPIRVModule).  This catches:
+#   - llvm::writeSpirv (all overloads)
+#   - llvm::readSpirv
+#   - llvm::regularizeLlvmForSpirv
+#   - llvm::initializeLLVMToSPIRVLegacyPass, OCLToSPIRV*, SPIRVTo*, etc.
+#   - SPIRV::SPIRVModule, SPIRV::TranslatorOpts, etc.
+# while keeping every generic llvm:: symbol (Module, PassManager,
+# AnalysisManager, Function, Value, BasicBlock, …) local to this image.
+
+# C++ llvm:: symbols whose name contains "Spirv" (writeSpirv, readSpirv,
+# regularizeLlvmForSpirv, …)
+__ZN4llvm*Spirv*
+__ZNK4llvm*Spirv*
+
+# C++ llvm:: symbols whose name contains "SPIRV" (initialize*SPIRV*Pass,
+# LLVMToSPIRV, OCLToSPIRV, SPIRVLowerBool, etc.)
+__ZN4llvm*SPIRV*
+__ZNK4llvm*SPIRV*
+
+# Entire SPIRV:: namespace — public helper classes live here.
+__ZN6SPIRV*
+__ZNK6SPIRV*
+
+# Any C-linkage SPIR-V helpers (none currently known, but cheap to future-proof)
+_writeSpirv*
+_readSpirv*
+_getSpirvLib*

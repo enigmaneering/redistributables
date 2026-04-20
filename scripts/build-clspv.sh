@@ -229,6 +229,21 @@ else
     CLSPV_EXTRA=""
 fi
 
+# On shared-lib platforms (darwin/linux) restrict libclspv_core's export
+# table to clspv's public C/C++ API.  Without this, the statically-linked
+# LLVM inside the dylib leaks ~14k mangled llvm::* symbols into dyld's
+# global table and cross-binds with other LLVM-embedding images in the
+# process (libmental, libLLVMSPIRVLib) → class-layout-mismatch segfault.
+# See scripts/clspv-exports.txt for rationale and pattern list.
+CLSPV_EXPORT_LINKER_FLAGS=""
+if [ "$IS_WASM" -ne 1 ] && [[ "$OSTYPE" != "msys" && "$OSTYPE" != "cygwin" && "$OSTYPE" != "win32" ]]; then
+    if [[ "$OSTYPE" == "darwin"* ]]; then
+        CLSPV_EXPORT_LINKER_FLAGS="-Wl,-exported_symbols_list,$SCRIPT_DIR/clspv-exports.txt"
+    else
+        CLSPV_EXPORT_LINKER_FLAGS="-Wl,--version-script=$SCRIPT_DIR/clspv-exports.ld"
+    fi
+fi
+
 "${CMAKE_CMD[@]}" .. \
     $CMAKE_GENERATOR \
     $CMAKE_OSX_ARCH_FLAG \
@@ -257,6 +272,7 @@ fi
     -DCLANG_INCLUDE_DOCS=OFF \
     -DCLANG_BUILD_EXAMPLES=OFF \
     -DCLANG_INCLUDE_EXAMPLES=OFF \
+    -DCMAKE_SHARED_LINKER_FLAGS="$CLSPV_EXPORT_LINKER_FLAGS" \
     $CLSPV_EXTRA
 
 "${MAKE_CMD[@]}" --build . --config Release --target clspv_core -j$NCPU
@@ -301,6 +317,36 @@ find ../include/clspv -name "*.h" -exec cp {} "$PACKAGE_DIR/include/clspv/" \; 2
 
 # License
 cp ../LICENSE "$PACKAGE_DIR/LICENSE"
+
+# Canary: verify the shared-lib export restriction actually took hold.
+# Only runs on native shared-lib builds (WASM static archives don't have
+# a visibility concept; Windows uses __declspec(dllexport) defaults).
+if [ "$IS_WASM" -ne 1 ] && [[ "$OSTYPE" != "msys" && "$OSTYPE" != "cygwin" && "$OSTYPE" != "win32" ]]; then
+    if [[ "$OSTYPE" == "darwin"* ]]; then
+        LIB_TO_CHECK=$(ls "$PACKAGE_DIR/lib/"libclspv_core*.dylib 2>/dev/null | head -1)
+        if [ -n "$LIB_TO_CHECK" ]; then
+            leaked=$(nm -gU "$LIB_TO_CHECK" 2>/dev/null | grep -E "PassManager|AnalysisManager|^[0-9a-f]+ T __ZN4llvm6Module" | head -3 || true)
+            if [ -n "$leaked" ]; then
+                echo "Error: LLVM internals leaked from $LIB_TO_CHECK:" >&2
+                echo "$leaked" >&2
+                echo "       exports list at $SCRIPT_DIR/clspv-exports.txt" \
+                     "didn't restrict the symbol table — check CMAKE_SHARED_LINKER_FLAGS" \
+                     "propagation and the exported_symbols_list patterns." >&2
+                exit 1
+            fi
+        fi
+    else
+        LIB_TO_CHECK=$(ls "$PACKAGE_DIR/lib/"libclspv_core*.so* 2>/dev/null | head -1)
+        if [ -n "$LIB_TO_CHECK" ]; then
+            leaked=$(nm -D --defined-only "$LIB_TO_CHECK" 2>/dev/null | grep -E "PassManager|AnalysisManager|_ZN4llvm6Module" | head -3 || true)
+            if [ -n "$leaked" ]; then
+                echo "Error: LLVM internals leaked from $LIB_TO_CHECK:" >&2
+                echo "$leaked" >&2
+                exit 1
+            fi
+        fi
+    fi
+fi
 
 cd "$OUTPUT_DIR"
 tar -czf "clspv-${PLATFORM}.tar.gz" "clspv-$PLATFORM"

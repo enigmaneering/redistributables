@@ -1,0 +1,26 @@
+# Exported-symbol whitelist for libclspv_core.dylib (darwin).
+# Consumed by `-Wl,-exported_symbols_list,<file>` during the shared-lib
+# link — anything not listed here becomes a local symbol and is invisible
+# to dyld at load time.
+#
+# Why we need this:
+# libclspv_core.dylib statically embeds its own full LLVM.  Without an
+# export list, ~50,000 symbols (of which ~14,000 are LLVM/Clang internals
+# like llvm::PassManager, llvm::AnalysisManager, etc.) escape into the
+# global symbol table.  If another image in the process (libmental.a with
+# its own statically-linked LLVM, or libLLVMSPIRVLib.dylib with its
+# separate copy) references the same mangled names, dyld's two-level
+# namespace policy can still cross-bind to whichever image won the
+# resolution race — a class-layout mismatch guaranteed to segfault on
+# first member access.  Been there, debugged that.
+#
+# By restricting exports to just clspv's public C/C++ API, each dylib's
+# LLVM stays private to that image.  No cross-binding hazard.
+#
+# C API (extern "C") — primary entry points used by downstream consumers:
+_clspv*
+
+# C++ namespace clspv::* — mangled names start with _ZN5clspv (length 5,
+# "clspv") or _ZNK5clspv (const-qualified).
+__ZN5clspv*
+__ZNK5clspv*

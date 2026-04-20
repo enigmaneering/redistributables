@@ -57,6 +57,22 @@ else
     SHARED=ON
 fi
 
+# On shared-lib platforms (darwin/linux) restrict the dylib's export table
+# to the translator's public API only.  The static-linked LLVM this dylib
+# embeds would otherwise leak ~14k mangled llvm::* symbols into dyld's
+# global table, which — since libmental and libclspv_core each carry
+# their own private LLVM — can cross-bind at load time and crash when
+# class layouts don't match.  See scripts/spirv-llvm-translator-exports.txt
+# for the full rationale and pattern list.
+EXPORT_LINKER_FLAGS=""
+if [ "$SHARED" = "ON" ]; then
+    if [[ "$OSTYPE" == "darwin"* ]]; then
+        EXPORT_LINKER_FLAGS="-Wl,-exported_symbols_list,$SCRIPT_DIR/spirv-llvm-translator-exports.txt"
+    else
+        EXPORT_LINKER_FLAGS="-Wl,--version-script=$SCRIPT_DIR/spirv-llvm-translator-exports.ld"
+    fi
+fi
+
 "${CMAKE_CMD[@]}" .. \
     $CMAKE_GENERATOR \
     $CMAKE_OSX_ARCH_FLAG \
@@ -64,7 +80,8 @@ fi
     -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
     -DLLVM_DIR="$LLVM_BUILD/lib/cmake/llvm" \
     -DBUILD_SHARED_LIBS=$SHARED \
-    -DLLVM_INCLUDE_TESTS=OFF
+    -DLLVM_INCLUDE_TESTS=OFF \
+    -DCMAKE_SHARED_LINKER_FLAGS="$EXPORT_LINKER_FLAGS"
 
 "${MAKE_CMD[@]}" --build . --config Release -j$NCPU
 
@@ -102,6 +119,39 @@ for required in LLVMSPIRVLib.h LLVMSPIRVOpts.h LLVMSPIRVExtensions.inc; do
 done
 
 cp ../LICENSE.TXT "$PACKAGE_DIR/LICENSE.TXT"
+
+# Canary: verify the shared-lib export restriction actually took effect.
+# If LLVM internals (PassManager, AnalysisManager, Module, etc.) leak into
+# the dylib's dynamic symbol table, the cross-binding crash this whole
+# exports list is meant to prevent will reappear at runtime.
+if [ "$SHARED" = "ON" ]; then
+    if [[ "$OSTYPE" == "darwin"* ]]; then
+        LIB_TO_CHECK=$(ls "$PACKAGE_DIR/lib/"libLLVMSPIRVLib*.dylib 2>/dev/null | head -1)
+        if [ -n "$LIB_TO_CHECK" ]; then
+            # These identifiers should NOT appear as exported dynamic symbols.
+            # If any do, the export list didn't restrict the symbol table.
+            leaked=$(nm -gU "$LIB_TO_CHECK" 2>/dev/null | grep -E "PassManager|AnalysisManager|^[0-9a-f]+ T __ZN4llvm6Module" | head -3 || true)
+            if [ -n "$leaked" ]; then
+                echo "Error: LLVM internals leaked from $LIB_TO_CHECK:" >&2
+                echo "$leaked" >&2
+                echo "       exports list at $SCRIPT_DIR/spirv-llvm-translator-exports.txt" \
+                     "didn't restrict the symbol table — check CMAKE_SHARED_LINKER_FLAGS" \
+                     "propagation and the exported_symbols_list patterns." >&2
+                exit 1
+            fi
+        fi
+    elif [[ "$OSTYPE" != "msys" && "$OSTYPE" != "cygwin" && "$OSTYPE" != "win32" ]]; then
+        LIB_TO_CHECK=$(ls "$PACKAGE_DIR/lib/"libLLVMSPIRVLib*.so* 2>/dev/null | head -1)
+        if [ -n "$LIB_TO_CHECK" ]; then
+            leaked=$(nm -D --defined-only "$LIB_TO_CHECK" 2>/dev/null | grep -E "PassManager|AnalysisManager|_ZN4llvm6Module" | head -3 || true)
+            if [ -n "$leaked" ]; then
+                echo "Error: LLVM internals leaked from $LIB_TO_CHECK:" >&2
+                echo "$leaked" >&2
+                exit 1
+            fi
+        fi
+    fi
+fi
 
 cd "$OUTPUT_DIR"
 tar -czf "spirv-llvm-translator-${PLATFORM}.tar.gz" "spirv-llvm-translator-$PLATFORM"
