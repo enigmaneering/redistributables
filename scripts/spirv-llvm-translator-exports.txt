@@ -19,7 +19,7 @@
 # AnalysisManager, Function, Value, BasicBlock, …) local to this image.
 
 # C++ llvm:: symbols whose name contains "Spirv" (writeSpirv, readSpirv,
-# regularizeLlvmForSpirv, …)
+# regularizeLlvmForSpirv, convertSpirvToLLVM …)
 __ZN4llvm*Spirv*
 __ZNK4llvm*Spirv*
 
@@ -27,6 +27,21 @@ __ZNK4llvm*Spirv*
 # LLVMToSPIRV, OCLToSPIRV, SPIRVLowerBool, etc.)
 __ZN4llvm*SPIRV*
 __ZNK4llvm*SPIRV*
+
+# Public llvm:: entry points that DON'T embed "Spirv"/"SPIRV" in the name
+# but ARE part of the translator's public API (LLVMSPIRVLib.h).  If the
+# translator's own llvm-spirv CLI tool references one of these and the
+# shared lib hides it, the build fails with "undefined reference".  These
+# are rare so we list them explicitly rather than broadening a pattern
+# that would expose LLVM internals:
+#   llvm::getSpecConstInfo + struct SpecConstInfoTy
+__ZN4llvm*SpecConst*
+__ZNK4llvm*SpecConst*
+#   llvm::initializePreprocessMetadataLegacyPass + its createPreprocess*
+#   companion + the callDefaultCtor<SPIRV::PreprocessMetadataLegacy>
+#   instantiation LLVM's pass-registration macros emit.
+__ZN4llvm*Preprocess*Metadata*
+__ZNK4llvm*Preprocess*Metadata*
 
 # Entire SPIRV:: namespace — public helper classes and free functions
 # (getErrorMessage, SPIRVModule, TranslatorOpts, …).  Length prefix is

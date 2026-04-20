@@ -6,13 +6,24 @@
 {
     global:
         /* llvm:: symbols containing "Spirv" — writeSpirv, readSpirv,
-         * regularizeLlvmForSpirv, and their const-qualified variants. */
+         * regularizeLlvmForSpirv, convertSpirvToLLVM, and their
+         * const-qualified variants. */
         _ZN4llvm*Spirv*;
         _ZNK4llvm*Spirv*;
 
         /* llvm:: symbols containing "SPIRV" — pass initializers. */
         _ZN4llvm*SPIRV*;
         _ZNK4llvm*SPIRV*;
+
+        /* Public llvm:: entry points whose names don't embed Spirv/SPIRV
+         * but ARE part of the translator's public API (LLVMSPIRVLib.h).
+         * Without these, llvm-spirv's own link fails with "undefined
+         * reference".  Listed explicitly to avoid broadening a pattern
+         * that would expose LLVM internals. */
+        _ZN4llvm*SpecConst*;         /* getSpecConstInfo + SpecConstInfoTy */
+        _ZNK4llvm*SpecConst*;
+        _ZN4llvm*Preprocess*Metadata*;  /* initializePreprocessMetadataLegacyPass */
+        _ZNK4llvm*Preprocess*Metadata*;
 
         /* SPIRV:: namespace — helper classes and free functions
          * (getErrorMessage, SPIRVModule, TranslatorOpts, …).
