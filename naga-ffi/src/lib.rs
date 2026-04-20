@@ -69,14 +69,11 @@ pub unsafe extern "C" fn naga_spirv_to_wgsl(
 ) -> i32 {
     let bytes = slice::from_raw_parts(spirv_data, spirv_len as usize);
 
-    // SPIRV is u32-aligned — reinterpret as word slice
     if bytes.len() % 4 != 0 {
         return write_error(wgsl_out, wgsl_len, "SPIRV data length is not a multiple of 4");
     }
-    let words: Vec<u32> = bytes
-        .chunks_exact(4)
-        .map(|c| u32::from_le_bytes([c[0], c[1], c[2], c[3]]))
-        .collect();
+    // (Earlier versions of naga::front::spv took &[u32]; current API takes
+    //  &[u8] via parse_u8_slice — no word-buffer conversion needed here.)
 
     let options = naga::front::spv::Options {
         adjust_coordinate_space: false,

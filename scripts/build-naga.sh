@@ -121,11 +121,15 @@ echo "Building Naga FFI shared library..."
 FFI_DIR="$SCRIPT_DIR/../naga-ffi"
 cargo rustc --release --manifest-path "$FFI_DIR/Cargo.toml" --crate-type=cdylib $CARGO_TARGET_FLAG
 
-# Determine binary location
+# Determine binary locations.  The naga-cli build runs out of wgpu/ so its
+# target dir is wgpu/target/.  The FFI crate is OUTSIDE wgpu's workspace,
+# so Cargo places its target at $FFI_DIR/target/ — keep them separate.
 if [ -n "$CARGO_TARGET" ]; then
-    BINARY_DIR="target/$CARGO_TARGET/release"
+    CLI_BIN_DIR="target/$CARGO_TARGET/release"
+    FFI_BIN_DIR="$FFI_DIR/target/$CARGO_TARGET/release"
 else
-    BINARY_DIR="target/release"
+    CLI_BIN_DIR="target/release"
+    FFI_BIN_DIR="$FFI_DIR/target/release"
 fi
 
 # Package output
@@ -137,22 +141,38 @@ mkdir -p "$PACKAGE_DIR/include"
 # Copy CLI binary
 echo "Packaging binary..."
 if [[ "$OSTYPE" == "msys" || "$OSTYPE" == "win32" || "$OSTYPE" == "cygwin" ]]; then
-    cp "$BINARY_DIR/naga.exe" "$PACKAGE_DIR/bin/"
+    cp "$CLI_BIN_DIR/naga.exe" "$PACKAGE_DIR/bin/"
 else
-    cp "$BINARY_DIR/naga" "$PACKAGE_DIR/bin/"
+    cp "$CLI_BIN_DIR/naga" "$PACKAGE_DIR/bin/"
 fi
 
-# Copy FFI shared library
-echo "Packaging FFI shared library..."
+# Copy FFI shared library.  A prior version silently masked failures here
+# with `cp ... 2>/dev/null || true`, shipping FFI-less naga packages that
+# broke downstream dlopen.  Fail loud instead — the canary below checks
+# that libnaga_ffi actually landed in lib/.
+echo "Packaging FFI shared library (from $FFI_BIN_DIR)..."
 if [[ "$OSTYPE" == "darwin"* ]]; then
-    cp "$BINARY_DIR/libnaga_ffi.dylib" "$PACKAGE_DIR/lib/" 2>/dev/null || true
+    cp "$FFI_BIN_DIR/libnaga_ffi.dylib" "$PACKAGE_DIR/lib/"
     for dylib in "$PACKAGE_DIR/lib/"*.dylib; do
-        install_name_tool -id "@rpath/$(basename "$dylib")" "$dylib" 2>/dev/null || true
+        install_name_tool -id "@rpath/$(basename "$dylib")" "$dylib"
     done
+    FFI_ARTIFACT="libnaga_ffi.dylib"
 elif [[ "$OSTYPE" == "msys" || "$OSTYPE" == "win32" || "$OSTYPE" == "cygwin" ]]; then
-    cp "$BINARY_DIR/naga_ffi.dll" "$PACKAGE_DIR/lib/" 2>/dev/null || true
+    cp "$FFI_BIN_DIR/naga_ffi.dll" "$PACKAGE_DIR/lib/"
+    FFI_ARTIFACT="naga_ffi.dll"
 else
-    cp "$BINARY_DIR/libnaga_ffi.so" "$PACKAGE_DIR/lib/" 2>/dev/null || true
+    cp "$FFI_BIN_DIR/libnaga_ffi.so" "$PACKAGE_DIR/lib/"
+    FFI_ARTIFACT="libnaga_ffi.so"
+fi
+
+# Canary: verify libnaga_ffi actually landed.  Downstream libmental dlopen's
+# this by name; an empty lib/ would silently disable WGSL everywhere.
+if [ ! -f "$PACKAGE_DIR/lib/$FFI_ARTIFACT" ]; then
+    echo "Error: $FFI_ARTIFACT missing from $PACKAGE_DIR/lib/" >&2
+    echo "       Expected source: $FFI_BIN_DIR/$FFI_ARTIFACT" >&2
+    echo "       $FFI_BIN_DIR contents:" >&2
+    ls -la "$FFI_BIN_DIR" >&2 || true
+    exit 1
 fi
 
 # Copy FFI header
