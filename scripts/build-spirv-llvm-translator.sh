@@ -124,13 +124,19 @@ cp ../LICENSE.TXT "$PACKAGE_DIR/LICENSE.TXT"
 # If LLVM internals (PassManager, AnalysisManager, Module, etc.) leak into
 # the dylib's dynamic symbol table, the cross-binding crash this whole
 # exports list is meant to prevent will reappear at runtime.
+# Canary grep pattern: only flag symbols whose OWNING namespace is llvm:: —
+# mangled prefixes `_ZN4llvm11PassManager`, `_ZN4llvm15AnalysisManager`,
+# `_ZN4llvm6Module`.  Naive "contains PassManager" would false-positive
+# on SPIRV::*Pass::run(llvm::Module&, llvm::AnalysisManager&) which takes
+# those LLVM types as PARAMETERS but lives in the SPIRV:: namespace.
+# The darwin symbol table adds a leading underscore (`__ZN4llvm...`);
+# Linux's ELF symbol table does not (`_ZN4llvm...`).
 if [ "$SHARED" = "ON" ]; then
     if [[ "$OSTYPE" == "darwin"* ]]; then
         LIB_TO_CHECK=$(ls "$PACKAGE_DIR/lib/"libLLVMSPIRVLib*.dylib 2>/dev/null | head -1)
         if [ -n "$LIB_TO_CHECK" ]; then
-            # These identifiers should NOT appear as exported dynamic symbols.
-            # If any do, the export list didn't restrict the symbol table.
-            leaked=$(nm -gU "$LIB_TO_CHECK" 2>/dev/null | grep -E "PassManager|AnalysisManager|^[0-9a-f]+ T __ZN4llvm6Module" | head -3 || true)
+            leaked=$(nm -gU "$LIB_TO_CHECK" 2>/dev/null | \
+                grep -E "__ZN4llvm11PassManager|__ZN4llvm15AnalysisManager|__ZN4llvm6Module" | head -3 || true)
             if [ -n "$leaked" ]; then
                 echo "Error: LLVM internals leaked from $LIB_TO_CHECK:" >&2
                 echo "$leaked" >&2
@@ -143,7 +149,8 @@ if [ "$SHARED" = "ON" ]; then
     elif [[ "$OSTYPE" != "msys" && "$OSTYPE" != "cygwin" && "$OSTYPE" != "win32" ]]; then
         LIB_TO_CHECK=$(ls "$PACKAGE_DIR/lib/"libLLVMSPIRVLib*.so* 2>/dev/null | head -1)
         if [ -n "$LIB_TO_CHECK" ]; then
-            leaked=$(nm -D --defined-only "$LIB_TO_CHECK" 2>/dev/null | grep -E "PassManager|AnalysisManager|_ZN4llvm6Module" | head -3 || true)
+            leaked=$(nm -D --defined-only "$LIB_TO_CHECK" 2>/dev/null | \
+                grep -E "_ZN4llvm11PassManager|_ZN4llvm15AnalysisManager|_ZN4llvm6Module" | head -3 || true)
             if [ -n "$leaked" ]; then
                 echo "Error: LLVM internals leaked from $LIB_TO_CHECK:" >&2
                 echo "$leaked" >&2

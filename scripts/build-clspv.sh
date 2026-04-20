@@ -321,11 +321,18 @@ cp ../LICENSE "$PACKAGE_DIR/LICENSE"
 # Canary: verify the shared-lib export restriction actually took hold.
 # Only runs on native shared-lib builds (WASM static archives don't have
 # a visibility concept; Windows uses __declspec(dllexport) defaults).
+#
+# Grep pattern matches ONLY symbols whose OWNING namespace is llvm::
+# (mangled prefix _ZN4llvm<length>Name).  A naive "contains PassManager"
+# would false-positive on clspv::*::run(llvm::Module&, llvm::AnalysisManager&)
+# which takes those LLVM types as parameters but lives in the clspv::
+# namespace.  See matching fix in build-spirv-llvm-translator.sh.
 if [ "$IS_WASM" -ne 1 ] && [[ "$OSTYPE" != "msys" && "$OSTYPE" != "cygwin" && "$OSTYPE" != "win32" ]]; then
     if [[ "$OSTYPE" == "darwin"* ]]; then
         LIB_TO_CHECK=$(ls "$PACKAGE_DIR/lib/"libclspv_core*.dylib 2>/dev/null | head -1)
         if [ -n "$LIB_TO_CHECK" ]; then
-            leaked=$(nm -gU "$LIB_TO_CHECK" 2>/dev/null | grep -E "PassManager|AnalysisManager|^[0-9a-f]+ T __ZN4llvm6Module" | head -3 || true)
+            leaked=$(nm -gU "$LIB_TO_CHECK" 2>/dev/null | \
+                grep -E "__ZN4llvm11PassManager|__ZN4llvm15AnalysisManager|__ZN4llvm6Module" | head -3 || true)
             if [ -n "$leaked" ]; then
                 echo "Error: LLVM internals leaked from $LIB_TO_CHECK:" >&2
                 echo "$leaked" >&2
@@ -338,7 +345,8 @@ if [ "$IS_WASM" -ne 1 ] && [[ "$OSTYPE" != "msys" && "$OSTYPE" != "cygwin" && "$
     else
         LIB_TO_CHECK=$(ls "$PACKAGE_DIR/lib/"libclspv_core*.so* 2>/dev/null | head -1)
         if [ -n "$LIB_TO_CHECK" ]; then
-            leaked=$(nm -D --defined-only "$LIB_TO_CHECK" 2>/dev/null | grep -E "PassManager|AnalysisManager|_ZN4llvm6Module" | head -3 || true)
+            leaked=$(nm -D --defined-only "$LIB_TO_CHECK" 2>/dev/null | \
+                grep -E "_ZN4llvm11PassManager|_ZN4llvm15AnalysisManager|_ZN4llvm6Module" | head -3 || true)
             if [ -n "$leaked" ]; then
                 echo "Error: LLVM internals leaked from $LIB_TO_CHECK:" >&2
                 echo "$leaked" >&2
