@@ -29,7 +29,7 @@ All tools are provided for:
 
 ## License
 
-All artifacts have open source licenses, which are verified on every build and packaged alongside each artifact.
+All artifacts have open source licenses, which are verified on every build and packaged alongside each.
 
 If any of the licenses change underneath us, a nightly check will alert us to address it at that time.
 
