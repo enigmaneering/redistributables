@@ -14,9 +14,13 @@
         _ZN4llvm*SPIRV*;
         _ZNK4llvm*SPIRV*;
 
-        /* SPIRV:: namespace — helper classes. */
-        _ZN6SPIRV*;
-        _ZNK6SPIRV*;
+        /* SPIRV:: namespace — helper classes and free functions
+         * (getErrorMessage, SPIRVModule, TranslatorOpts, …).
+         * Length prefix is 5 (chars in "SPIRV"), not 6 — earlier
+         * bug here caused llvm-spirv's link to fail with
+         * "undefined reference to SPIRV::getErrorMessage". */
+        _ZN5SPIRV*;
+        _ZNK5SPIRV*;
 
         /* C-linkage helpers if any. */
         writeSpirv*;

@@ -28,9 +28,14 @@ __ZNK4llvm*Spirv*
 __ZN4llvm*SPIRV*
 __ZNK4llvm*SPIRV*
 
-# Entire SPIRV:: namespace — public helper classes live here.
-__ZN6SPIRV*
-__ZNK6SPIRV*
+# Entire SPIRV:: namespace — public helper classes and free functions
+# (getErrorMessage, SPIRVModule, TranslatorOpts, …).  Length prefix is
+# the number of characters in "SPIRV" = 5, NOT 6 (an earlier version
+# of this file had __ZN6SPIRV* which matched nothing; the translator's
+# own llvm-spirv CLI tool then failed to link against the shared lib
+# with "undefined reference to SPIRV::getErrorMessage").
+__ZN5SPIRV*
+__ZNK5SPIRV*
 
 # Any C-linkage SPIR-V helpers (none currently known, but cheap to future-proof)
 _writeSpirv*
