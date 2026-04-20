@@ -29,7 +29,9 @@ All tools are provided for:
 
 ## License
 
-All components are Apache 2.0 or dual MIT/Apache 2.0. Licenses are verified on every build and packaged alongside each artifact.
+All components have open source licenses, which are verified on every build and packaged alongside each artifact.
+
+If any of the licenses change underneath us, a nightly check will alert us to address it at that time.
 
 ## Windows Note
 
