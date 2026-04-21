@@ -41,37 +41,21 @@ cd build
 if [ "$IS_WASM" -eq 1 ]; then
     CMAKE_CMD=(emcmake "$CMAKE")
     MAKE_CMD=(emmake "$CMAKE")
-    SHARED=OFF
-elif [[ "$OSTYPE" == "msys" || "$OSTYPE" == "cygwin" || "$OSTYPE" == "win32" ]]; then
-    # Windows: LLVM is distributed as static .a archives. Building
-    # SPIRV-LLVM-Translator with BUILD_SHARED_LIBS=ON bundles those statics
-    # into libLLVMSPIRVLib.dll, and its import lib then re-exports the LLVM
-    # symbols. Linking llvm-spirv.exe pulls both the import lib and LLVM's
-    # static .a → "multiple definition" errors. Match WASM and go static.
-    CMAKE_CMD=("$CMAKE")
-    MAKE_CMD=("$CMAKE")
-    SHARED=OFF
 else
     CMAKE_CMD=("$CMAKE")
     MAKE_CMD=("$CMAKE")
-    SHARED=ON
 fi
 
-# On shared-lib platforms (darwin/linux) restrict the dylib's export table
-# to the translator's public API only.  The static-linked LLVM this dylib
-# embeds would otherwise leak ~14k mangled llvm::* symbols into dyld's
-# global table, which — since libmental and libclspv_core each carry
-# their own private LLVM — can cross-bind at load time and crash when
-# class layouts don't match.  See scripts/spirv-llvm-translator-exports.txt
-# for the full rationale and pattern list.
-EXPORT_LINKER_FLAGS=""
-if [ "$SHARED" = "ON" ]; then
-    if [[ "$OSTYPE" == "darwin"* ]]; then
-        EXPORT_LINKER_FLAGS="-Wl,-exported_symbols_list,$SCRIPT_DIR/spirv-llvm-translator-exports.txt"
-    else
-        EXPORT_LINKER_FLAGS="-Wl,--version-script=$SCRIPT_DIR/spirv-llvm-translator-exports.ld"
-    fi
-fi
+# Static-only build: libLLVMSPIRVLib.a is the only artifact, with undefined
+# LLVM symbols that the downstream consumer (libmental_llvm.dylib) resolves
+# by linking the same LLVM archives separately.  This replaces the previous
+# per-platform split (darwin/linux shared, win/wasm static) — every
+# platform now produces a static archive that libmental merges into one
+# self-contained dylib on its side.  The dyld-symbol-leak hazard the old
+# shared-lib visibility whitelist was guarding against (two LLVMs in one
+# process) is structurally eliminated: the final dylib has exactly one
+# LLVM.  Symbol visibility for the final dylib is controlled by its own
+# exports list (cmake/mental-llvm-exports.txt).
 
 "${CMAKE_CMD[@]}" .. \
     $CMAKE_GENERATOR \
@@ -79,9 +63,8 @@ fi
     -DCMAKE_BUILD_TYPE=Release \
     -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
     -DLLVM_DIR="$LLVM_BUILD/lib/cmake/llvm" \
-    -DBUILD_SHARED_LIBS=$SHARED \
-    -DLLVM_INCLUDE_TESTS=OFF \
-    -DCMAKE_SHARED_LINKER_FLAGS="$EXPORT_LINKER_FLAGS"
+    -DBUILD_SHARED_LIBS=OFF \
+    -DLLVM_INCLUDE_TESTS=OFF
 
 "${MAKE_CMD[@]}" --build . --config Release -j$NCPU
 
@@ -89,14 +72,17 @@ fi
 PACKAGE_DIR="$OUTPUT_DIR/spirv-llvm-translator-$PLATFORM"
 mkdir -p "$PACKAGE_DIR/lib" "$PACKAGE_DIR/include"
 
-echo "Packaging spirv-llvm-translator..."
-if [ "$IS_WASM" -eq 1 ] || [[ "$OSTYPE" == "msys" || "$OSTYPE" == "cygwin" || "$OSTYPE" == "win32" ]]; then
-    # WASM + Windows: static .a (see SHARED=OFF branch above)
-    find lib -name "*.a" | while read f; do cp "$f" "$PACKAGE_DIR/lib/"; done
-elif [[ "$OSTYPE" == "darwin"* ]]; then
-    find lib -name "libLLVMSPIRVLib*.dylib" | while read f; do cp "$f" "$PACKAGE_DIR/lib/"; done
-else
-    find lib -name "libLLVMSPIRVLib*.so*" | while read f; do cp -P "$f" "$PACKAGE_DIR/lib/"; done
+echo "Packaging spirv-llvm-translator (static archive)..."
+# Static-only packaging: one rule, every platform.
+find lib -name "libLLVMSPIRVLib*.a" | while read f; do cp "$f" "$PACKAGE_DIR/lib/"; done
+
+# Sanity check: fail loudly if the static archive didn't land where we
+# expect.  Same rationale as the matching check in build-clspv.sh.
+if [ -z "$(ls -A "$PACKAGE_DIR/lib/" 2>/dev/null)" ]; then
+    echo "Error: libLLVMSPIRVLib.a was not produced by the translator build."
+    echo "Build tree contents relevant to LLVMSPIRVLib:"
+    find . -name 'libLLVMSPIRVLib*' -o -name 'LLVMSPIRVLib*'
+    exit 1
 fi
 
 # Ship every public header SPIRV-LLVM-Translator exposes.  Upstream places
@@ -120,45 +106,10 @@ done
 
 cp ../LICENSE.TXT "$PACKAGE_DIR/LICENSE.TXT"
 
-# Canary: verify the shared-lib export restriction actually took effect.
-# If LLVM internals (PassManager, AnalysisManager, Module, etc.) leak into
-# the dylib's dynamic symbol table, the cross-binding crash this whole
-# exports list is meant to prevent will reappear at runtime.
-# Canary grep pattern: only flag symbols whose OWNING namespace is llvm:: —
-# mangled prefixes `_ZN4llvm11PassManager`, `_ZN4llvm15AnalysisManager`,
-# `_ZN4llvm6Module`.  Naive "contains PassManager" would false-positive
-# on SPIRV::*Pass::run(llvm::Module&, llvm::AnalysisManager&) which takes
-# those LLVM types as PARAMETERS but lives in the SPIRV:: namespace.
-# The darwin symbol table adds a leading underscore (`__ZN4llvm...`);
-# Linux's ELF symbol table does not (`_ZN4llvm...`).
-if [ "$SHARED" = "ON" ]; then
-    if [[ "$OSTYPE" == "darwin"* ]]; then
-        LIB_TO_CHECK=$(ls "$PACKAGE_DIR/lib/"libLLVMSPIRVLib*.dylib 2>/dev/null | head -1)
-        if [ -n "$LIB_TO_CHECK" ]; then
-            leaked=$(nm -gU "$LIB_TO_CHECK" 2>/dev/null | \
-                grep -E "__ZN4llvm11PassManager|__ZN4llvm15AnalysisManager|__ZN4llvm6Module" | head -3 || true)
-            if [ -n "$leaked" ]; then
-                echo "Error: LLVM internals leaked from $LIB_TO_CHECK:" >&2
-                echo "$leaked" >&2
-                echo "       exports list at $SCRIPT_DIR/spirv-llvm-translator-exports.txt" \
-                     "didn't restrict the symbol table — check CMAKE_SHARED_LINKER_FLAGS" \
-                     "propagation and the exported_symbols_list patterns." >&2
-                exit 1
-            fi
-        fi
-    elif [[ "$OSTYPE" != "msys" && "$OSTYPE" != "cygwin" && "$OSTYPE" != "win32" ]]; then
-        LIB_TO_CHECK=$(ls "$PACKAGE_DIR/lib/"libLLVMSPIRVLib*.so* 2>/dev/null | head -1)
-        if [ -n "$LIB_TO_CHECK" ]; then
-            leaked=$(nm -D --defined-only "$LIB_TO_CHECK" 2>/dev/null | \
-                grep -E "_ZN4llvm11PassManager|_ZN4llvm15AnalysisManager|_ZN4llvm6Module" | head -3 || true)
-            if [ -n "$leaked" ]; then
-                echo "Error: LLVM internals leaked from $LIB_TO_CHECK:" >&2
-                echo "$leaked" >&2
-                exit 1
-            fi
-        fi
-    fi
-fi
+# Shared-library symbol-visibility canary removed with the static-only
+# switch — same reason as in build-clspv.sh.  Static .a archives have
+# no dynamic symbol table to enforce against; visibility of the final
+# libmental_llvm.dylib is controlled on the libmental side.
 
 cd "$OUTPUT_DIR"
 tar -czf "spirv-llvm-translator-${PLATFORM}.tar.gz" "spirv-llvm-translator-$PLATFORM"

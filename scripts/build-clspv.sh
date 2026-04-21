@@ -229,20 +229,22 @@ else
     CLSPV_EXTRA=""
 fi
 
-# On shared-lib platforms (darwin/linux) restrict libclspv_core's export
-# table to clspv's public C/C++ API.  Without this, the statically-linked
-# LLVM inside the dylib leaks ~14k mangled llvm::* symbols into dyld's
-# global table and cross-binds with other LLVM-embedding images in the
-# process (libmental, libLLVMSPIRVLib) → class-layout-mismatch segfault.
-# See scripts/clspv-exports.txt for rationale and pattern list.
-CLSPV_EXPORT_LINKER_FLAGS=""
-if [ "$IS_WASM" -ne 1 ] && [[ "$OSTYPE" != "msys" && "$OSTYPE" != "cygwin" && "$OSTYPE" != "win32" ]]; then
-    if [[ "$OSTYPE" == "darwin"* ]]; then
-        CLSPV_EXPORT_LINKER_FLAGS="-Wl,-exported_symbols_list,$SCRIPT_DIR/clspv-exports.txt"
-    else
-        CLSPV_EXPORT_LINKER_FLAGS="-Wl,--version-script=$SCRIPT_DIR/clspv-exports.ld"
-    fi
-fi
+# Static-only build: clspv's code ships as libclspv_core.a with undefined
+# LLVM symbols that the downstream consumer (libmental_llvm.dylib) resolves
+# by linking the same LLVM archives separately.  This replaces the previous
+# CLSPV_SHARED_LIB=ON build which produced an 87 MB dylib with LLVM
+# statically bundled inside — a self-contained but separately-shipped
+# artifact that libmental had to chain-load at runtime.  With static-only
+# output, libmental_llvm.dylib becomes ONE self-contained file with clspv
+# + translator + LLVM all merged, and the dyld-symbol-leak hazard this
+# whole toolchain was built to avoid (two LLVMs in one process) simply
+# doesn't arise — there's only one LLVM in the final dylib.
+#
+# Consequence: the CLSPV_EXPORT_LINKER_FLAGS / clspv-exports.txt visibility
+# restriction and its accompanying canary (both below) are shared-lib
+# concepts — static archives have no dynamic symbol table to restrict.
+# Symbol visibility for the FINAL shared library (libmental_llvm.dylib)
+# is controlled by its own exports list on the libmental side.
 
 "${CMAKE_CMD[@]}" .. \
     $CMAKE_GENERATOR \
@@ -252,7 +254,7 @@ fi
     -DCLSPV_LLVM_SOURCE_DIR="$LLVM_BUILD/src/llvm" \
     -DCLSPV_CLANG_SOURCE_DIR="$LLVM_BUILD/src/clang" \
     -DCLSPV_LLVM_BINARY_DIR="$LLVM_BUILD" \
-    -DCLSPV_SHARED_LIB=ON \
+    -DCLSPV_SHARED_LIB=OFF \
     -DCLSPV_BUILD_TESTS=OFF \
     -DCLSPV_BUILD_SPIRV_DIS=OFF \
     -DENABLE_CLSPV_OPT=OFF \
@@ -272,7 +274,6 @@ fi
     -DCLANG_INCLUDE_DOCS=OFF \
     -DCLANG_BUILD_EXAMPLES=OFF \
     -DCLANG_INCLUDE_EXAMPLES=OFF \
-    -DCMAKE_SHARED_LINKER_FLAGS="$CLSPV_EXPORT_LINKER_FLAGS" \
     $CLSPV_EXTRA
 
 "${MAKE_CMD[@]}" --build . --config Release --target clspv_core -j$NCPU
@@ -281,31 +282,17 @@ fi
 PACKAGE_DIR="$OUTPUT_DIR/clspv-$PLATFORM"
 mkdir -p "$PACKAGE_DIR/lib" "$PACKAGE_DIR/include/clspv"
 
-echo "Packaging clspv..."
-if [ "$IS_WASM" -eq 1 ]; then
-    find . -name "libclspv_core.a" | while read f; do cp "$f" "$PACKAGE_DIR/lib/"; done
-elif [[ "$OSTYPE" == "darwin"* ]]; then
-    find . -name "libclspv_core*.dylib" | while read f; do cp "$f" "$PACKAGE_DIR/lib/"; done
-    for d in "$PACKAGE_DIR/lib/"*.dylib; do
-        install_name_tool -id "@rpath/$(basename "$d")" "$d" 2>/dev/null || true
-    done
-elif [[ "$OSTYPE" == "msys" || "$OSTYPE" == "cygwin" || "$OSTYPE" == "win32" ]]; then
-    # MinGW shared-lib output is libclspv_core.dll + libclspv_core.dll.a
-    # (import lib). Copy both so downstream consumers can link + load.
-    # The prior linux-only find -name "*.so*" pattern missed these and
-    # produced empty Windows artifacts silently.
-    find . -name "libclspv_core*.dll" | while read f; do cp "$f" "$PACKAGE_DIR/lib/"; done
-    find . -name "libclspv_core*.dll.a" | while read f; do cp "$f" "$PACKAGE_DIR/lib/"; done
-else
-    find . -name "libclspv_core*.so*" | while read f; do cp -P "$f" "$PACKAGE_DIR/lib/"; done
-fi
+# Static-only packaging: one rule, every platform.  Windows/MinGW writes
+# to build/lib/libclspv_core.a just like the unix toolchains; no DLL
+# sidecar, no import lib, no per-platform branching.
+echo "Packaging clspv (static archive)..."
+find . -name "libclspv_core.a" | while read f; do cp "$f" "$PACKAGE_DIR/lib/"; done
 
-# Sanity check: the artifact must actually contain libclspv_core.* — the
-# prior silent-empty-artifact state (Windows .dll missed by *.so* glob)
-# passed CI with a 0-byte clspv-*.tar.gz that only surfaced at release
-# upload. Fail here instead.
+# Sanity check: the artifact must actually contain libclspv_core.a — if
+# the target name or output layout ever changes upstream, fail loud here
+# rather than silently shipping a zero-byte tarball.
 if [ -z "$(ls -A "$PACKAGE_DIR/lib/" 2>/dev/null)" ]; then
-    echo "Error: no clspv core library was packaged for $PLATFORM."
+    echo "Error: libclspv_core.a was not produced by the clspv build."
     echo "Build tree contents relevant to clspv_core:"
     find . -name 'libclspv_core*' -o -name 'clspv_core*'
     exit 1
@@ -318,43 +305,10 @@ find ../include/clspv -name "*.h" -exec cp {} "$PACKAGE_DIR/include/clspv/" \; 2
 # License
 cp ../LICENSE "$PACKAGE_DIR/LICENSE"
 
-# Canary: verify the shared-lib export restriction actually took hold.
-# Only runs on native shared-lib builds (WASM static archives don't have
-# a visibility concept; Windows uses __declspec(dllexport) defaults).
-#
-# Grep pattern matches ONLY symbols whose OWNING namespace is llvm::
-# (mangled prefix _ZN4llvm<length>Name).  A naive "contains PassManager"
-# would false-positive on clspv::*::run(llvm::Module&, llvm::AnalysisManager&)
-# which takes those LLVM types as parameters but lives in the clspv::
-# namespace.  See matching fix in build-spirv-llvm-translator.sh.
-if [ "$IS_WASM" -ne 1 ] && [[ "$OSTYPE" != "msys" && "$OSTYPE" != "cygwin" && "$OSTYPE" != "win32" ]]; then
-    if [[ "$OSTYPE" == "darwin"* ]]; then
-        LIB_TO_CHECK=$(ls "$PACKAGE_DIR/lib/"libclspv_core*.dylib 2>/dev/null | head -1)
-        if [ -n "$LIB_TO_CHECK" ]; then
-            leaked=$(nm -gU "$LIB_TO_CHECK" 2>/dev/null | \
-                grep -E "__ZN4llvm11PassManager|__ZN4llvm15AnalysisManager|__ZN4llvm6Module" | head -3 || true)
-            if [ -n "$leaked" ]; then
-                echo "Error: LLVM internals leaked from $LIB_TO_CHECK:" >&2
-                echo "$leaked" >&2
-                echo "       exports list at $SCRIPT_DIR/clspv-exports.txt" \
-                     "didn't restrict the symbol table — check CMAKE_SHARED_LINKER_FLAGS" \
-                     "propagation and the exported_symbols_list patterns." >&2
-                exit 1
-            fi
-        fi
-    else
-        LIB_TO_CHECK=$(ls "$PACKAGE_DIR/lib/"libclspv_core*.so* 2>/dev/null | head -1)
-        if [ -n "$LIB_TO_CHECK" ]; then
-            leaked=$(nm -D --defined-only "$LIB_TO_CHECK" 2>/dev/null | \
-                grep -E "_ZN4llvm11PassManager|_ZN4llvm15AnalysisManager|_ZN4llvm6Module" | head -3 || true)
-            if [ -n "$leaked" ]; then
-                echo "Error: LLVM internals leaked from $LIB_TO_CHECK:" >&2
-                echo "$leaked" >&2
-                exit 1
-            fi
-        fi
-    fi
-fi
+# Shared-library symbol-visibility canary removed with the static-only
+# switch: static .a archives have no dynamic symbol table to canary.
+# Symbol visibility for the final dylib (libmental_llvm.dylib) is enforced
+# on the libmental side via cmake/mental-llvm-exports.txt.
 
 cd "$OUTPUT_DIR"
 tar -czf "clspv-${PLATFORM}.tar.gz" "clspv-$PLATFORM"
