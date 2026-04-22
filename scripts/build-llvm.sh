@@ -160,7 +160,8 @@ $CMAKE_CMD ../llvm \
     -DCLANG_ENABLE_ARCMT=OFF \
     -DCLANG_ENABLE_STATIC_ANALYZER=OFF \
     -DCLANG_INCLUDE_TESTS=OFF \
-    -DCLANG_INCLUDE_DOCS=OFF
+    -DCLANG_INCLUDE_DOCS=OFF \
+    -DCLANG_ENABLE_HLSL=ON
 
 echo "Building LLVM (this may take a while)..."
 $MAKE_CMD --build . --config Release -j$NCPU
