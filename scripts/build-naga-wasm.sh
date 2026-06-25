@@ -86,10 +86,14 @@ cd "$NAGA_FFI_DIR"
 # toolchain that Cargo will actually use — wgpu pins to a specific Rust
 # version via rust-toolchain.toml, but naga-ffi uses stable.
 rustup target add wasm32-unknown-emscripten
-# Emscripten's emcc must be used as the C compiler for build scripts and native deps
+# Emscripten's emcc must be used as the C compiler for build scripts and native deps.
+# We force --crate-type=staticlib here: naga-ffi's Cargo.toml declares both
+# staticlib and cdylib (so native builds produce both forms), but a cdylib
+# for wasm32-unknown-emscripten requires extra linker plumbing we don't need —
+# downstream libmental statically links libnaga_ffi.a on WASM.
 CC_wasm32_unknown_emscripten=emcc \
 CXX_wasm32_unknown_emscripten=em++ \
-cargo build --release --target wasm32-unknown-emscripten
+cargo rustc --release --target wasm32-unknown-emscripten --crate-type=staticlib
 cd "$BUILD_DIR/wgpu-wasm"
 
 # Package output

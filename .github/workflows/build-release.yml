@@ -63,11 +63,19 @@ jobs:
         run: |
           set -e
 
-          CLSPV_SHA=$(curl -sSLf https://api.github.com/repos/google/clspv/commits/main \
-            | python3 -c 'import json,sys; print(json.load(sys.stdin)["sha"])')
+          # Pinned clspv SHA — last known-working commit (2026-05-08).
+          # Upstream libclc's CMake API churned post-May-8 in a way that
+          # rejects our LLVM_DEFAULT_TARGET_TRIPLE=clspv-- trick with
+          # "Unknown libclc target architecture: clspv".  Until that's
+          # diagnosed, we hold at the SHA that produced the last green
+          # release rather than chase main HEAD daily.  Bump deliberately
+          # by editing this constant once the libclc target-triple issue
+          # is understood and a fix lands either upstream or in
+          # build-clspv.sh.
+          CLSPV_SHA=f781210fc173488f3136d7013e9a04d6c110eb07
 
-          # Read deps.json AT the resolved clspv SHA (not main HEAD again) —
-          # this is the load-bearing part of avoiding the race.
+          # Read deps.json AT the pinned clspv SHA — keeps LLVM matched
+          # to the clspv tree we're actually building.
           LLVM_SHA=$(curl -sSLf "https://raw.githubusercontent.com/google/clspv/$CLSPV_SHA/deps.json" \
             | python3 -c 'import json,sys; d=json.load(sys.stdin); print(next(c["commit"] for c in d["commits"] if c["name"]=="llvm"))')
 
@@ -1385,3 +1393,80 @@ jobs:
             exit 1
           fi
 
+  # ================================================================
+  #  Notify on failure — opens (or updates) a "build-failing" issue.
+  #
+  #  Because the scheduled check-versions workflow dispatches this one
+  #  via GITHUB_TOKEN, failure emails go to github-actions[bot], not the
+  #  repo owner.  An issue is a routing-independent signal: the owner's
+  #  "All" notification preference picks it up.
+  #
+  #  check-versions.yml gates its auto-dispatch on this issue being
+  #  open, so a failing build halts daily auto-dispatch until the
+  #  issue is closed.  Manual workflow_dispatch is always allowed.
+  # ================================================================
+  notify-failure:
+    name: Open or update build-failing issue
+    if: failure()
+    needs:
+      - announce
+      - determine-shas
+      - verify-licenses
+      - build-glslang
+      - build-spirv-cross
+      - build-mesa-spirv-to-dxil
+      - build-llvm
+      - build-clspv
+      - build-spirv-llvm-translator
+      - build-naga
+      - download-wgpu-native
+      - determine-version
+      - create-release
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+    steps:
+      - uses: actions/github-script@v7
+        with:
+          script: |
+            const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            const eventName = context.eventName;
+            const triggerReason = `${{ inputs.trigger_reason || 'unknown' }}`;
+
+            const body = [
+              `Build failed: [run #${context.runId}](${runUrl})`,
+              ``,
+              `**Trigger:** ${eventName} — ${triggerReason}`,
+              `**Commit:** ${context.sha}`,
+              ``,
+              `Auto-dispatch from check-versions is paused until this issue is closed.`,
+              `Manual \`workflow_dispatch\` from the Actions tab is still allowed for testing fixes.`,
+            ].join('\n');
+
+            const existing = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              labels: 'build-failing',
+              per_page: 1,
+            });
+
+            if (existing.data.length > 0) {
+              const issue = existing.data[0];
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issue.number,
+                body: body,
+              });
+              core.notice(`Commented on existing build-failing issue #${issue.number}`);
+            } else {
+              const created = await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title: 'Build failing — manual intervention required',
+                body: body,
+                labels: ['build-failing'],
+              });
+              core.notice(`Opened build-failing issue #${created.data.number}`);
+            }

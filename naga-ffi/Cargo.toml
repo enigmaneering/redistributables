@@ -5,7 +5,12 @@ edition = "2021"
 description = "Thin C FFI wrapper around Naga for linking into non-Rust projects"
 
 [lib]
-crate-type = ["staticlib"]
+# Build both forms in one cargo invocation:
+#   - staticlib → libnaga_ffi.a   — linked into libmental.a/.dylib statically
+#                                   on every platform (native + WASM)
+#   - cdylib    → libnaga_ffi.{dylib,so,dll} — kept for consumers who prefer
+#                                   to dlopen at runtime
+crate-type = ["staticlib", "cdylib"]
 
 [dependencies]
 naga = { git = "https://github.com/gfx-rs/wgpu.git", features = [
