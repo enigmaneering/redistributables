@@ -1314,7 +1314,7 @@ jobs:
           fi
 
   create-release:
-    name: Create Shader Binaries Release
+    name: Create External Binaries Release
     needs: [determine-version]
     runs-on: ubuntu-latest
     permissions:
@@ -1322,7 +1322,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Download shader binary artifacts
+      - name: Download external binary artifacts
         uses: actions/download-artifact@v4
         with:
           path: artifacts
