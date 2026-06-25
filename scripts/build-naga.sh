@@ -151,27 +151,42 @@ fi
 # failures here with `cp ... 2>/dev/null || true`, shipping FFI-less naga
 # packages that broke downstream consumers.  Fail loud instead — the canary
 # below verifies both artifacts actually landed in lib/.
+#
+# Rust/Cargo's static-archive naming differs by toolchain:
+#   - Unix (gnu, darwin):  libnaga_ffi.a
+#   - Windows MSVC:        naga_ffi.lib  (no 'lib' prefix, '.lib' extension)
+#   - WASM (emscripten):   libnaga_ffi.a (handled in build-naga-wasm.sh)
+# Downstream libmental's CMake picks the right file per platform.
 echo "Packaging FFI libraries (from $FFI_BIN_DIR)..."
-# The static archive is platform-agnostic in name.
-cp "$FFI_BIN_DIR/libnaga_ffi.a" "$PACKAGE_DIR/lib/"
 
 if [[ "$OSTYPE" == "darwin"* ]]; then
+    cp "$FFI_BIN_DIR/libnaga_ffi.a" "$PACKAGE_DIR/lib/"
     cp "$FFI_BIN_DIR/libnaga_ffi.dylib" "$PACKAGE_DIR/lib/"
     for dylib in "$PACKAGE_DIR/lib/"*.dylib; do
         install_name_tool -id "@rpath/$(basename "$dylib")" "$dylib"
     done
+    FFI_STATIC_ARTIFACT="libnaga_ffi.a"
     FFI_DYN_ARTIFACT="libnaga_ffi.dylib"
 elif [[ "$OSTYPE" == "msys" || "$OSTYPE" == "win32" || "$OSTYPE" == "cygwin" ]]; then
+    cp "$FFI_BIN_DIR/naga_ffi.lib" "$PACKAGE_DIR/lib/"
     cp "$FFI_BIN_DIR/naga_ffi.dll" "$PACKAGE_DIR/lib/"
+    # Cargo also emits naga_ffi.dll.lib (import library for the dll) —
+    # consumers that dynamically link rather than dlopen will need it.
+    if [ -f "$FFI_BIN_DIR/naga_ffi.dll.lib" ]; then
+        cp "$FFI_BIN_DIR/naga_ffi.dll.lib" "$PACKAGE_DIR/lib/"
+    fi
+    FFI_STATIC_ARTIFACT="naga_ffi.lib"
     FFI_DYN_ARTIFACT="naga_ffi.dll"
 else
+    cp "$FFI_BIN_DIR/libnaga_ffi.a" "$PACKAGE_DIR/lib/"
     cp "$FFI_BIN_DIR/libnaga_ffi.so" "$PACKAGE_DIR/lib/"
+    FFI_STATIC_ARTIFACT="libnaga_ffi.a"
     FFI_DYN_ARTIFACT="libnaga_ffi.so"
 fi
 
 # Canary: verify both static and dynamic FFI artifacts landed.  libmental
-# statically links libnaga_ffi.a; missing it silently disables WGSL.
-for required in libnaga_ffi.a "$FFI_DYN_ARTIFACT"; do
+# statically links the archive; missing it silently disables WGSL.
+for required in "$FFI_STATIC_ARTIFACT" "$FFI_DYN_ARTIFACT"; do
     if [ ! -f "$PACKAGE_DIR/lib/$required" ]; then
         echo "Error: $required missing from $PACKAGE_DIR/lib/" >&2
         echo "       Expected source: $FFI_BIN_DIR/$required" >&2
