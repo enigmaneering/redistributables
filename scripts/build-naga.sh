@@ -102,13 +102,22 @@ elif [[ "$OSTYPE" == "linux-gnu"* ]] && [ -n "$CMAKE_ARCH" ] && [ "$CMAKE_ARCH" 
     # Set up cross-compilation environment
     export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc
 elif [[ "$OSTYPE" == "msys" || "$OSTYPE" == "win32" || "$OSTYPE" == "cygwin" ]]; then
-    # Windows
+    # Windows — use GNU/MinGW ABI to match the rest of the redistributable
+    # stack (glslang, spirv-cross, SPIRV-Tools all built with MinGW GCC on
+    # x86_64 and MinGW Clang on aarch64).  Linking an MSVC-built naga FFI
+    # against MinGW libmental fails with undefined references to MSVC-only
+    # runtime symbols (__chkstk, __imp_NtWriteFile, MSVC vtables, etc.).
     if [ -n "$CROSS_COMPILE_TARGET" ] && [ "$CROSS_COMPILE_TARGET" = "aarch64" ]; then
-        CARGO_TARGET="aarch64-pc-windows-msvc"
-        echo "Cross-compiling for $CARGO_TARGET"
-        rustup target add "$CARGO_TARGET"
-        CARGO_TARGET_FLAG="--target $CARGO_TARGET"
+        # Rust has no stable aarch64-pc-windows-gnu; the gnullvm target uses
+        # Clang/LLVM-MinGW which matches the CLANGARM64 MSYS2 environment
+        # libmental uses on Windows arm64.
+        CARGO_TARGET="aarch64-pc-windows-gnullvm"
+    else
+        CARGO_TARGET="x86_64-pc-windows-gnu"
     fi
+    echo "Targeting $CARGO_TARGET (MinGW ABI to match libmental's Windows build)"
+    rustup target add "$CARGO_TARGET"
+    CARGO_TARGET_FLAG="--target $CARGO_TARGET"
 fi
 
 # Build the CLI tool (naga-cli package produces naga binary)
@@ -152,11 +161,10 @@ fi
 # packages that broke downstream consumers.  Fail loud instead — the canary
 # below verifies both artifacts actually landed in lib/.
 #
-# Rust/Cargo's static-archive naming differs by toolchain:
-#   - Unix (gnu, darwin):  libnaga_ffi.a
-#   - Windows MSVC:        naga_ffi.lib  (no 'lib' prefix, '.lib' extension)
-#   - WASM (emscripten):   libnaga_ffi.a (handled in build-naga-wasm.sh)
-# Downstream libmental's CMake picks the right file per platform.
+# With the MinGW ABI on Windows (gnu / gnullvm), Cargo's naming aligns with
+# Unix conventions: libnaga_ffi.a for static, libnaga_ffi.dll.a as the
+# import library for the dll, naga_ffi.dll itself.  Downstream libmental
+# uses libnaga_ffi.a on every platform.
 echo "Packaging FFI libraries (from $FFI_BIN_DIR)..."
 
 if [[ "$OSTYPE" == "darwin"* ]]; then
@@ -165,24 +173,22 @@ if [[ "$OSTYPE" == "darwin"* ]]; then
     for dylib in "$PACKAGE_DIR/lib/"*.dylib; do
         install_name_tool -id "@rpath/$(basename "$dylib")" "$dylib"
     done
-    FFI_STATIC_ARTIFACT="libnaga_ffi.a"
     FFI_DYN_ARTIFACT="libnaga_ffi.dylib"
 elif [[ "$OSTYPE" == "msys" || "$OSTYPE" == "win32" || "$OSTYPE" == "cygwin" ]]; then
-    cp "$FFI_BIN_DIR/naga_ffi.lib" "$PACKAGE_DIR/lib/"
+    cp "$FFI_BIN_DIR/libnaga_ffi.a" "$PACKAGE_DIR/lib/"
     cp "$FFI_BIN_DIR/naga_ffi.dll" "$PACKAGE_DIR/lib/"
-    # Cargo also emits naga_ffi.dll.lib (import library for the dll) —
+    # MinGW also emits libnaga_ffi.dll.a (import library for the dll) —
     # consumers that dynamically link rather than dlopen will need it.
-    if [ -f "$FFI_BIN_DIR/naga_ffi.dll.lib" ]; then
-        cp "$FFI_BIN_DIR/naga_ffi.dll.lib" "$PACKAGE_DIR/lib/"
+    if [ -f "$FFI_BIN_DIR/libnaga_ffi.dll.a" ]; then
+        cp "$FFI_BIN_DIR/libnaga_ffi.dll.a" "$PACKAGE_DIR/lib/"
     fi
-    FFI_STATIC_ARTIFACT="naga_ffi.lib"
     FFI_DYN_ARTIFACT="naga_ffi.dll"
 else
     cp "$FFI_BIN_DIR/libnaga_ffi.a" "$PACKAGE_DIR/lib/"
     cp "$FFI_BIN_DIR/libnaga_ffi.so" "$PACKAGE_DIR/lib/"
-    FFI_STATIC_ARTIFACT="libnaga_ffi.a"
     FFI_DYN_ARTIFACT="libnaga_ffi.so"
 fi
+FFI_STATIC_ARTIFACT="libnaga_ffi.a"
 
 # Canary: verify both static and dynamic FFI artifacts landed.  libmental
 # statically links the archive; missing it silently disables WGSL.
