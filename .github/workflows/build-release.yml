@@ -1118,6 +1118,41 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
 
+      # ---- Windows MinGW toolchain ----
+      # Rust now targets *-pc-windows-gnu(llvm) on Windows to match the
+      # ABI of the rest of the redistributable stack (glslang, spirv-cross,
+      # etc.) and libmental's downstream MinGW build.  That requires the
+      # MinGW linker on PATH:
+      #   - x86_64-pc-windows-gnu     → x86_64-w64-mingw32-gcc (MSYS2 MINGW64)
+      #   - aarch64-pc-windows-gnullvm → aarch64-w64-mingw32-clang (llvm-mingw)
+      - name: Setup MinGW (Windows)
+        if: runner.os == 'Windows'
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: false
+          cache: true
+          path-type: inherit
+          install: >-
+            mingw-w64-x86_64-gcc
+
+      - name: Cache llvm-mingw (Windows arm64)
+        if: matrix.cross_compile_target == 'aarch64'
+        id: cache-llvm-mingw
+        uses: actions/cache@v4
+        with:
+          path: llvm-mingw-20260311-ucrt-x86_64
+          key: llvm-mingw-20260311-ucrt-x86_64
+
+      - name: Download llvm-mingw (Windows arm64)
+        if: matrix.cross_compile_target == 'aarch64' && steps.cache-llvm-mingw.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          # llvm-mingw provides the aarch64-w64-mingw32-clang linker that
+          # the aarch64-pc-windows-gnullvm Rust target requires.
+          curl -L -o llvm-mingw.zip https://github.com/mstorsjo/llvm-mingw/releases/download/20260311/llvm-mingw-20260311-ucrt-x86_64.zip
+          unzip -q llvm-mingw.zip
+
       - name: Install Emscripten (WASM)
         if: matrix.wasm
         uses: mymindstorm/setup-emsdk@v14
@@ -1134,7 +1169,14 @@ jobs:
 
       - name: Build Naga (Windows)
         if: runner.os == 'Windows'
-        shell: bash
+        shell: msys2 {0}
+        env:
+          # For the aarch64-pc-windows-gnullvm cross-compile, point Cargo
+          # at the LLVM-MinGW linker we just downloaded.  The variable name
+          # is the Rust convention: CARGO_TARGET_<TRIPLE_UPPER>_LINKER.
+          # Empty on amd64 builds — unset is fine; Cargo only reads the
+          # var when building that specific target.
+          CARGO_TARGET_AARCH64_PC_WINDOWS_GNULLVM_LINKER: ${{ github.workspace }}/llvm-mingw-20260311-ucrt-x86_64/bin/aarch64-w64-mingw32-clang
         run: |
           chmod +x scripts/build-naga.sh
           BUILD_DIR="${{ runner.temp }}/build" \
