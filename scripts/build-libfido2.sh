@@ -252,9 +252,20 @@ if [[ "$PLATFORM" == windows-* ]]; then
     # -pedantic-errors from the CMakeLists before configure runs.  We
     # keep the -W* warnings so genuine libfido2 code issues still show up
     # in the build log — just not promoted to hard errors.
+    #
+    # Also strip regress/ from the top-level build.  libfido2 always
+    # adds it as a subdirectory, but the resulting test binaries
+    # (regress_cred.exe, regress_assert.exe, ...) pull in OpenSSL's
+    # e_capi + winstore engines which reference crypt32 symbols
+    # (CertOpenStore, CertFreeCertificateContext, etc.) — and libfido2's
+    # own CMake doesn't link crypt32 into those test executables.
+    # We only need libfido2.a for downstream libmental linking; the
+    # regress binaries are dead weight.  Same treatment for BUILD_TOOLS
+    # off — belt-and-suspenders with the cmake -DBUILD_TOOLS=OFF flag.
     sed -i \
         -e 's/add_compile_options(-Werror)/# stripped: add_compile_options(-Werror)/g' \
         -e 's/add_compile_options(-pedantic-errors)/# stripped: add_compile_options(-pedantic-errors)/g' \
+        -e 's/add_subdirectory(regress)/# stripped: add_subdirectory(regress)/g' \
         "libfido2-${LIBFIDO2_VERSION}/CMakeLists.txt"
 
     mkdir -p "libfido2-build-$PLATFORM"
