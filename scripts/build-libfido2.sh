@@ -235,18 +235,18 @@ if [[ "$PLATFORM" == windows-* ]]; then
     # is neither built nor linked.
     #
     # LIBFIDO2_CFLAGS: libfido2 sets `-pedantic -Werror` on all its C
-    # sources.  Fine on Linux/mac where GCC's system-header handling
-    # exempts winnt-style anonymous structs / pragma pack idioms, but
-    # broken on Windows where MinGW's <winnt.h> uses both heavily and
-    # clang treats every one as -Werror.  Since libfido2 itself doesn't
-    # give us a knob to turn off -Werror selectively, we just blanket-
-    # disable warnings-as-errors here.  Windows headers are what they
-    # are; libfido2's own warnings we lose are worth trading for a
-    # working build.  (The specific categories that trip: c11-extensions,
-    # pragma-pack, ignored-attributes, cast-qual, sign-conversion,
-    # typedef-redefinition, deprecated-declarations — every -Wno-error=
-    # entry would need periodic maintenance as clang adds new checks.)
-    LIBFIDO2_CFLAGS="-Wno-error"
+    # sources.  We strip -Werror from CMakeLists.txt above; -Wno-error
+    # is a belt-and-suspenders for anything the sed might miss.
+    #
+    # -DHAVE_CLOCK_GETTIME: libfido2's openbsd-compat layer provides a
+    # clock_gettime() shim gated behind #if !defined(HAVE_CLOCK_GETTIME).
+    # On Windows cross-compile CMake's try_compile-based feature
+    # detection doesn't reliably discover that mingw-w64 provides
+    # clock_gettime (via <pthread_time.h>), so the shim gets compiled
+    # and collides with the real declaration.  Force the macro on and
+    # the shim is a no-op.  Mingw-w64 has provided clock_gettime since
+    # around 2013 on both amd64 and aarch64 targets.
+    LIBFIDO2_CFLAGS="-Wno-error -DHAVE_CLOCK_GETTIME=1"
     export PKG_CONFIG_PATH="$OPENSSL_PREFIX/lib/pkgconfig:$BUILD_DIR/libcbor-install-$PLATFORM/lib/pkgconfig"
     cmake ../"libfido2-${LIBFIDO2_VERSION}" \
         -G "MSYS Makefiles" \
