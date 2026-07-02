@@ -89,6 +89,33 @@ mkdir -p "$OUT/lib" "$OUT/include" "$OUT/LICENSES"
 # OpenSSL 3.6.3 has native mingw64 + mingwarm64 Configure targets, so
 # both architectures get real static builds — no wrapper hacks.
 if [[ "$PLATFORM" == windows-* ]]; then
+    # Normalize every path we'll hand to OpenSSL / CMake into POSIX form.
+    # The workflow passes BUILD_DIR / OUTPUT_DIR as "D:\a\_temp/build" — a
+    # mix of backslashes (from ${{ runner.temp }}) and forward slashes
+    # (from our script append).  MSYS2 bash handles mixed-slash paths in
+    # `cd`, but OpenSSL's Configure and pkg-config choke on the drive-
+    # letter form when they compose paths.  cygpath -u produces
+    # /d/a/_temp/build, which every downstream tool accepts.
+    BUILD_DIR="$(cygpath -u "$BUILD_DIR")"
+    OUTPUT_DIR="$(cygpath -u "$OUTPUT_DIR")"
+
+    # Recompute OUT so it picks up the POSIX-form OUTPUT_DIR.
+    OUT="$OUTPUT_DIR/libfido2-$PLATFORM"
+    rm -rf "$OUT"
+    mkdir -p "$OUT/lib" "$OUT/include" "$OUT/LICENSES"
+
+    mkdir -p "$BUILD_DIR" "$OUTPUT_DIR"
+    cd "$BUILD_DIR"
+
+    # Force MSYS2's Unix-flavored /usr/bin/perl to the front of PATH.
+    # The setup-msys2 action installs it there, but the GitHub Windows
+    # runner also has Strawberry Perl (5.38 for MSWin32-x64) further up
+    # PATH — OpenSSL's Configure rejects it with:
+    #   "This perl implementation doesn't produce Unix like paths..."
+    # /usr/bin/perl is what mingw builds want; force it first.
+    export PATH="/usr/bin:$PATH"
+    PERL_BIN="/usr/bin/perl"
+
     case "$PLATFORM" in
         windows-amd64)
             OPENSSL_TARGET="mingw64"
@@ -141,7 +168,7 @@ if [[ "$PLATFORM" == windows-* ]]; then
         OPENSSL_CONFIGURE+=("--cross-compile-prefix=$CROSS_PREFIX")
     fi
     echo "Configuring OpenSSL: ${OPENSSL_CONFIGURE[*]}"
-    perl "$BUILD_DIR/$OPENSSL_SRC_DIR/Configure" "${OPENSSL_CONFIGURE[@]}"
+    "$PERL_BIN" "$BUILD_DIR/$OPENSSL_SRC_DIR/Configure" "${OPENSSL_CONFIGURE[@]}"
     make -j "$NCPU" build_libs
     make install_dev
     cd "$BUILD_DIR"
