@@ -116,6 +116,14 @@ if [[ "$PLATFORM" == windows-* ]]; then
     export PATH="/usr/bin:$PATH"
     PERL_BIN="/usr/bin/perl"
 
+    # Prevent MSYS2's MINGW64 environment from leaking amd64 header
+    # search paths into aarch64-w64-mingw32-clang.  MSYS2 sets these
+    # to /mingw64/include etc. for its native environment; when clang
+    # is cross-compiling to aarch64, it will happily consume them and
+    # produce object files that reference amd64 struct layouts.  The
+    # explicit unset forces clang to use its own sysroot for headers.
+    unset CPATH C_INCLUDE_PATH CPLUS_INCLUDE_PATH LIBRARY_PATH
+
     case "$PLATFORM" in
         windows-amd64)
             OPENSSL_TARGET="mingw64"
@@ -214,12 +222,15 @@ if [[ "$PLATFORM" == windows-* ]]; then
     # sources.  Fine on Linux/mac where GCC's system-header handling
     # exempts winnt-style anonymous structs / pragma pack idioms, but
     # broken on Windows where MinGW's <winnt.h> uses both heavily and
-    # clang (or newer gcc) promotes them to errors under -pedantic.
-    # -Wno-error=c11-extensions covers the anonymous-struct/union case;
-    # -Wno-error=pragma-pack covers the pshpack*.h / poppack.h ranges;
-    # -Wno-error=deprecated-declarations covers libfido2's own use of
-    # OpenSSL 1.x APIs that OpenSSL 3.x has deprecated.
-    LIBFIDO2_CFLAGS="-Wno-error=c11-extensions -Wno-error=pragma-pack -Wno-error=deprecated-declarations"
+    # clang treats every one as -Werror.  Since libfido2 itself doesn't
+    # give us a knob to turn off -Werror selectively, we just blanket-
+    # disable warnings-as-errors here.  Windows headers are what they
+    # are; libfido2's own warnings we lose are worth trading for a
+    # working build.  (The specific categories that trip: c11-extensions,
+    # pragma-pack, ignored-attributes, cast-qual, sign-conversion,
+    # typedef-redefinition, deprecated-declarations — every -Wno-error=
+    # entry would need periodic maintenance as clang adds new checks.)
+    LIBFIDO2_CFLAGS="-Wno-error"
     export PKG_CONFIG_PATH="$OPENSSL_PREFIX/lib/pkgconfig:$BUILD_DIR/libcbor-install-$PLATFORM/lib/pkgconfig"
     cmake ../"libfido2-${LIBFIDO2_VERSION}" \
         -G "MSYS Makefiles" \
