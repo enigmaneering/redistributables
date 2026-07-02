@@ -52,6 +52,33 @@ jobs:
           echo "clspv=$CLSPV" >> $GITHUB_OUTPUT
           echo "clspv: $CLSPV (main)"
 
+          # FIDO2 stack — libfido2 + libcbor + hidapi + OpenSSL.  These
+          # are bundled inside the libfido2-<platform>.tar.gz artifact
+          # (see scripts/build-libfido2.sh).  hidapi's tag pattern is
+          # `hidapi-X.Y.Z`, not `vX.Y.Z`, so we scrape tag_name verbatim.
+          LIBFIDO2=$(curl -s https://api.github.com/repos/Yubico/libfido2/releases/latest | grep '"tag_name"' | sed -E 's/.*"tag_name": "([^"]+)".*/\1/')
+          echo "libfido2=$LIBFIDO2" >> $GITHUB_OUTPUT
+          echo "libfido2: $LIBFIDO2"
+
+          LIBCBOR=$(curl -s https://api.github.com/repos/PJK/libcbor/releases/latest | grep '"tag_name"' | sed -E 's/.*"tag_name": "v?([^"]+)".*/\1/')
+          echo "libcbor=$LIBCBOR" >> $GITHUB_OUTPUT
+          echo "libcbor: $LIBCBOR"
+
+          HIDAPI=$(curl -s https://api.github.com/repos/libusb/hidapi/releases/latest | grep '"tag_name"' | sed -E 's/.*"tag_name": "([^"]+)".*/\1/')
+          echo "hidapi=$HIDAPI" >> $GITHUB_OUTPUT
+          echo "hidapi: $HIDAPI"
+
+          # OpenSSL ships many release channels — filter to stable 3.x
+          # (skip 4.x preview + LTS variants that would churn the release
+          # cadence).  The check-versions job is best-effort here; the
+          # Windows FIDO2 build still pins the exact version internally.
+          OPENSSL=$(curl -s https://api.github.com/repos/openssl/openssl/releases | \
+                    grep '"tag_name"' | \
+                    sed -E 's/.*"tag_name": "openssl-([^"]+)".*/\1/' | \
+                    grep -E '^3\.[0-9]+\.[0-9]+$' | head -1)
+          echo "openssl=$OPENSSL" >> $GITHUB_OUTPUT
+          echo "openssl: $OPENSSL"
+
       - name: Check current versions
         id: check
         run: |
@@ -66,6 +93,10 @@ jobs:
             CURRENT_LLVM=$(grep "LLVM=" CURRENT_VERSIONS.txt | cut -d'=' -f2 || echo "")
             CURRENT_SPIRV_TRANSLATOR=$(grep "SPIRV_TRANSLATOR=" CURRENT_VERSIONS.txt | cut -d'=' -f2 || echo "")
             CURRENT_CLSPV=$(grep "CLSPV=" CURRENT_VERSIONS.txt | cut -d'=' -f2 || echo "")
+            CURRENT_LIBFIDO2=$(grep "LIBFIDO2=" CURRENT_VERSIONS.txt | cut -d'=' -f2 || echo "")
+            CURRENT_LIBCBOR=$(grep "LIBCBOR=" CURRENT_VERSIONS.txt | cut -d'=' -f2 || echo "")
+            CURRENT_HIDAPI=$(grep "HIDAPI=" CURRENT_VERSIONS.txt | cut -d'=' -f2 || echo "")
+            CURRENT_OPENSSL=$(grep "OPENSSL=" CURRENT_VERSIONS.txt | cut -d'=' -f2 || echo "")
 
             echo "Current versions:"
             echo "  glslang: $CURRENT_GLSLANG -> ${{ steps.versions.outputs.glslang }}"
@@ -75,6 +106,10 @@ jobs:
             echo "  LLVM: $CURRENT_LLVM -> ${{ steps.versions.outputs.llvm }}"
             echo "  SPIRV-LLVM-Translator: $CURRENT_SPIRV_TRANSLATOR -> ${{ steps.versions.outputs.spirv_translator }}"
             echo "  clspv: $CURRENT_CLSPV -> ${{ steps.versions.outputs.clspv }}"
+            echo "  libfido2: $CURRENT_LIBFIDO2 -> ${{ steps.versions.outputs.libfido2 }}"
+            echo "  libcbor: $CURRENT_LIBCBOR -> ${{ steps.versions.outputs.libcbor }}"
+            echo "  hidapi: $CURRENT_HIDAPI -> ${{ steps.versions.outputs.hidapi }}"
+            echo "  OpenSSL: $CURRENT_OPENSSL -> ${{ steps.versions.outputs.openssl }}"
 
             if [ "$CURRENT_GLSLANG" != "${{ steps.versions.outputs.glslang }}" ] || \
                [ "$CURRENT_SPIRV_CROSS" != "${{ steps.versions.outputs.spirv_cross }}" ] || \
@@ -82,7 +117,11 @@ jobs:
                [ "$CURRENT_NAGA" != "${{ steps.versions.outputs.naga }}" ] || \
                [ "$CURRENT_LLVM" != "${{ steps.versions.outputs.llvm }}" ] || \
                [ "$CURRENT_SPIRV_TRANSLATOR" != "${{ steps.versions.outputs.spirv_translator }}" ] || \
-               [ "$CURRENT_CLSPV" != "${{ steps.versions.outputs.clspv }}" ]; then
+               [ "$CURRENT_CLSPV" != "${{ steps.versions.outputs.clspv }}" ] || \
+               [ "$CURRENT_LIBFIDO2" != "${{ steps.versions.outputs.libfido2 }}" ] || \
+               [ "$CURRENT_LIBCBOR" != "${{ steps.versions.outputs.libcbor }}" ] || \
+               [ "$CURRENT_HIDAPI" != "${{ steps.versions.outputs.hidapi }}" ] || \
+               [ "$CURRENT_OPENSSL" != "${{ steps.versions.outputs.openssl }}" ]; then
               echo "New versions detected!"
               echo "needs_release=true" >> $GITHUB_OUTPUT
             else
@@ -102,6 +141,10 @@ jobs:
           LLVM=${{ steps.versions.outputs.llvm }}
           SPIRV_TRANSLATOR=${{ steps.versions.outputs.spirv_translator }}
           CLSPV=${{ steps.versions.outputs.clspv }}
+          LIBFIDO2=${{ steps.versions.outputs.libfido2 }}
+          LIBCBOR=${{ steps.versions.outputs.libcbor }}
+          HIDAPI=${{ steps.versions.outputs.hidapi }}
+          OPENSSL=${{ steps.versions.outputs.openssl }}
           UPDATED=$(date -u +"%Y-%m-%d %H:%M:%S UTC")
           EOF
 
