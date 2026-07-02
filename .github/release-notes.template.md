@@ -20,6 +20,7 @@ Complete cross-platform shader compilation toolchain with support for GLSL, HLSL
 | **llvm** | LLVM + Clang (NVPTX, AMDGPU, SPIRV experimental backends) | Foundation for clspv and SPIRV-LLVM-Translator |
 | **spirv-llvm-translator** | SPIR-V ↔ LLVM IR bridge (built against llvm) | Cross-hub translation |
 | **wgpu-native** | Cross-platform WebGPU implementation | GPU compute via Metal/Vulkan/D3D12/OpenGL |
+| **libfido2** | Yubico's FIDO2/CTAP2 stack (+ libcbor, hidapi on Linux, libcrypto) | Enumerate + drive external security keys for WebAuthn attestation |
 
 ## 💻 Supported Platforms
 
@@ -41,6 +42,7 @@ Each tool is packaged separately:
 - `llvm-{platform}.tar.gz` / `.zip`
 - `spirv-llvm-translator-{platform}.tar.gz` / `.zip`
 - `wgpu-{platform}.tar.gz`
+- `libfido2-{platform}.tar.gz` (bundles static libfido2.a + libcbor.a + libcrypto.a + fido/openssl headers; hidapi statically linked on Linux; Windows uses Yubico's official prebuilt)
 
 ## 📝 License
 

@@ -156,6 +156,12 @@ jobs:
           git clone --depth 1 https://github.com/KhronosGroup/SPIRV-Cross.git spirv-cross
           git clone --depth 1 https://github.com/gfx-rs/wgpu-native.git wgpu-native
           git clone --depth 1 https://github.com/gfx-rs/wgpu.git wgpu
+          # FIDO2 stack: pin to the exact release tags build-libfido2.sh
+          # consumes so a licence amendment in a future tag doesn't
+          # slip past the check.
+          git clone --depth 1 --branch 1.15.0 https://github.com/Yubico/libfido2.git libfido2
+          git clone --depth 1 --branch v0.11.0 https://github.com/PJK/libcbor.git libcbor
+          git clone --depth 1 --branch hidapi-0.14.0 https://github.com/libusb/hidapi.git hidapi
           # Mesa: only the spirv-to-dxil carve-out lands in our packages,
           # but the umbrella license text is what consumers reference.
           # Pin to the same release tag the build script uses so a Mesa
@@ -197,6 +203,9 @@ jobs:
           EXPECTED_CLANG="ebcd9bbf783a73d05c53ba4d586b8d5813dcdf3bbec50265860ccc885e606f47"
           EXPECTED_SPIRV_TRANSLATOR="e3bc36440fc927c62d5cc24efeefe225a14d4e34ffeb0c92e430625cce9ee444"
           EXPECTED_MESA="0d1a0472ecc81830e75c20d59b0ea02841e3db21255e0ebad97ab682c54d6615"
+          EXPECTED_LIBFIDO2="e8946152897134a9e9205b0db0659dd77c279de683d7cc64465629a12d1abfd8"
+          EXPECTED_LIBCBOR="6a5e182d758db66ecad6e6fa304dc637d4d2585bafceb5003c86e8dc9f6344ff"
+          EXPECTED_HIDAPI="7d3b087c34f35d4d538e3bcddd1ff8f66e92f9ef336881999482800ddf840913"
 
           FAILED=0
           CHANGES=""
@@ -226,6 +235,9 @@ jobs:
           check "Clang" llvm-project/clang/LICENSE.TXT "$EXPECTED_CLANG"
           check "SPIRV-LLVM-Translator" spirv-llvm-translator/LICENSE.TXT "$EXPECTED_SPIRV_TRANSLATOR"
           check "Mesa (spirv-to-dxil)" mesa/docs/license.rst "$EXPECTED_MESA"
+          check "libfido2" libfido2/LICENSE "$EXPECTED_LIBFIDO2"
+          check "libcbor" libcbor/LICENSE.md "$EXPECTED_LIBCBOR"
+          check "hidapi" hidapi/LICENSE.txt "$EXPECTED_HIDAPI"
 
           echo "CHANGES<<EOF" >> $GITHUB_ENV
           echo -e "$CHANGES" >> $GITHUB_ENV
@@ -456,6 +468,97 @@ jobs:
         with:
           name: glslang-${{ matrix.platform }}
           path: ${{ runner.temp }}/output/glslang-${{ matrix.platform }}.*
+
+  # ==================================================================
+  #  libfido2 — Yubico's FIDO2/CTAP2 stack (libfido2 + libcbor +
+  #  hidapi on Linux + libcrypto). Powers the Fido2Authenticator surface
+  #  in libmental — every security key we recognise (YubiKey, Titan,
+  #  SoloKey, ...) is enumerated through this static bundle.
+  #
+  #  macOS/Linux: build libfido2 + libcbor (+ hidapi on Linux) from
+  #               source with CMake; bundle the system's libcrypto.a
+  #               + openssl headers so libmental compiles cleanly with
+  #               no Homebrew shortcut on the consumer side.
+  #  Windows:     download Yubico's official prebuilt zip.
+  # ==================================================================
+  build-libfido2:
+    needs: [verify-licenses]
+    name: "Build libfido2 (${{ matrix.platform }})"
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - os: macos-latest
+            runner: macos-14  # ARM64
+            platform: darwin-arm64
+            macos_arch: arm64
+          - os: macos-latest
+            runner: macos-14  # Cross-compile x86_64 on ARM64
+            platform: darwin-amd64
+            macos_arch: x86_64
+          - os: ubuntu-latest
+            runner: ubuntu-latest
+            platform: linux-amd64
+          - os: ubuntu-latest
+            runner: ubuntu-24.04-arm
+            platform: linux-arm64
+          - os: windows-latest
+            runner: windows-latest
+            platform: windows-amd64
+          - os: windows-latest
+            runner: windows-latest
+            platform: windows-arm64
+            cross_compile_target: aarch64
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install OpenSSL + hidapi deps (Linux)
+        if: startsWith(matrix.platform, 'linux-')
+        run: |
+          sudo apt-get update
+          # hidapi-hidraw is the only hidapi backend we ship; libudev is
+          # needed at BUILD time for enumeration but the resulting
+          # libhidapi-hidraw.a only requires libudev.so.1 at runtime,
+          # which is universal on any systemd distro.  No libusb.
+          sudo apt-get install -y \
+              libssl-dev \
+              libudev-dev \
+              pkg-config \
+              cmake
+
+      - name: Install OpenSSL (macOS)
+        if: startsWith(matrix.platform, 'darwin-')
+        run: |
+          # macOS runners ship brew + openssl@3 preinstalled, but pin the
+          # dep explicitly so a runner-image rev never breaks the build.
+          brew install openssl@3 pkg-config cmake
+
+      - name: Build libfido2 (macOS/Linux)
+        if: ${{ !startsWith(matrix.platform, 'windows-') }}
+        shell: bash
+        run: |
+          chmod +x scripts/build-libfido2.sh
+          BUILD_DIR="${{ runner.temp }}/build" \
+          OUTPUT_DIR="${{ runner.temp }}/output" \
+          MACOS_ARCH="${{ matrix.macos_arch || '' }}" \
+          bash scripts/build-libfido2.sh
+
+      - name: Build libfido2 (Windows — Yubico prebuilt)
+        if: startsWith(matrix.platform, 'windows-')
+        shell: bash
+        run: |
+          chmod +x scripts/build-libfido2.sh
+          BUILD_DIR="${{ runner.temp }}/build" \
+          OUTPUT_DIR="${{ runner.temp }}/output" \
+          CROSS_COMPILE_TARGET="${{ matrix.cross_compile_target || '' }}" \
+          bash scripts/build-libfido2.sh
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: libfido2-${{ matrix.platform }}
+          path: ${{ runner.temp }}/output/libfido2-${{ matrix.platform }}.*
 
   build-spirv-cross:
     needs: [verify-licenses]
@@ -1301,7 +1404,7 @@ jobs:
 
   determine-version:
     name: Determine Version
-    needs: [build-glslang, build-spirv-cross, build-mesa-spirv-to-dxil, build-llvm, build-clspv, build-spirv-llvm-translator, build-naga, download-wgpu-native]
+    needs: [build-glslang, build-spirv-cross, build-mesa-spirv-to-dxil, build-llvm, build-clspv, build-spirv-llvm-translator, build-naga, build-libfido2, download-wgpu-native]
     runs-on: ubuntu-latest
     permissions:
       contents: write  # Need write permission to create and push tags
@@ -1368,7 +1471,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           path: artifacts
-          pattern: '{glslang,spirv-cross,spirv-to-dxil,naga,wgpu,llvm,clspv,spirv-llvm-translator}-*'
+          pattern: '{glslang,spirv-cross,spirv-to-dxil,naga,wgpu,llvm,clspv,spirv-llvm-translator,libfido2}-*'
 
       - name: Display artifact structure
         run: ls -R artifacts
