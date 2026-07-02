@@ -160,14 +160,22 @@ cd "$BUILD_DIR"
 # target for Glitter unikernel deployments).  libusb-1.0 is often absent
 # from embedded/minimal images.
 if [[ "$PLATFORM" == linux-* ]]; then
-    if [ ! -d "hidapi-${HIDAPI_VERSION#hidapi-}" ]; then
+    # GitHub archives use the pattern <repo>-<tag>, so the tag
+    # `hidapi-0.14.0` produces a top-level dir named `hidapi-hidapi-0.14.0`.
+    # Everything downstream (existence check, cmake source path, licence
+    # copy) MUST use HIDAPI_SRC_DIR — do not compose paths from
+    # ${HIDAPI_VERSION#hidapi-}; that strips the necessary prefix and
+    # produces a wrong path that CMake will reject with "source directory
+    # does not exist".
+    HIDAPI_SRC_DIR="hidapi-${HIDAPI_VERSION}"
+    if [ ! -d "$HIDAPI_SRC_DIR" ]; then
         echo "Fetching hidapi ${HIDAPI_VERSION}..."
         curl -fsSL "https://github.com/libusb/hidapi/archive/refs/tags/${HIDAPI_VERSION}.tar.gz" \
             | tar -xz
     fi
     mkdir -p "hidapi-build-$PLATFORM"
     cd "hidapi-build-$PLATFORM"
-    cmake ../"hidapi-${HIDAPI_VERSION#hidapi-}" \
+    cmake ../"$HIDAPI_SRC_DIR" \
         -DCMAKE_BUILD_TYPE=Release \
         -DBUILD_SHARED_LIBS=OFF \
         -DHIDAPI_WITH_HIDRAW=ON \
@@ -285,7 +293,7 @@ fi
 cp "$BUILD_DIR/libfido2-${LIBFIDO2_VERSION}/LICENSE" "$OUT/LICENSES/libfido2-LICENSE" 2>/dev/null || true
 cp "$BUILD_DIR/libcbor-${LIBCBOR_VERSION}/LICENSE.md" "$OUT/LICENSES/libcbor-LICENSE" 2>/dev/null || true
 if [[ "$PLATFORM" == linux-* ]]; then
-    cp "$BUILD_DIR/hidapi-${HIDAPI_VERSION#hidapi-}/LICENSE.txt" "$OUT/LICENSES/hidapi-LICENSE" 2>/dev/null || true
+    cp "$BUILD_DIR/hidapi-${HIDAPI_VERSION}/LICENSE.txt" "$OUT/LICENSES/hidapi-LICENSE" 2>/dev/null || true
 fi
 
 # Roll the flat staging dir into the tarball CI uploads as the release
