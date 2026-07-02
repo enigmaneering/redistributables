@@ -63,30 +63,56 @@ rm -rf "$OUT"
 mkdir -p "$OUT/lib" "$OUT/include" "$OUT/LICENSES"
 
 # --- Windows: use Yubico's prebuilt --------------------------------------
+#
+# As of libfido2 1.15.0, Yubico ships a SINGLE `libfido2-<VERSION>-win.zip`
+# containing all four Windows arches under top-level subdirs.  Older
+# releases (< 1.10) used per-arch zips like `-win64.zip` / `-win-arm64.zip`.
+# We pick the subdir matching the target platform and use its /static/
+# variant (MSVC-format .lib files — consumers linking with MinGW would
+# need to convert or ignore these; on the mental side WIN32 currently
+# short-circuits libfido2 to a stub, see mental/CMakeLists.txt).
 if [[ "$PLATFORM" == windows-* ]]; then
     case "$PLATFORM" in
-        windows-amd64) YBOX_ARCH="win64" ;;
-        windows-arm64) YBOX_ARCH="win-arm64" ;;
+        windows-amd64) YBOX_SUBDIR="Win64" ;;
+        windows-arm64) YBOX_SUBDIR="ARM64" ;;
         *) echo "Unknown Windows arch: $PLATFORM"; exit 1 ;;
     esac
 
-    ZIP_URL="https://developers.yubico.com/libfido2/Releases/libfido2-${LIBFIDO2_VERSION}-${YBOX_ARCH}.zip"
-    ZIP_FILE="libfido2-${LIBFIDO2_VERSION}-${YBOX_ARCH}.zip"
+    ZIP_URL="https://developers.yubico.com/libfido2/Releases/libfido2-${LIBFIDO2_VERSION}-win.zip"
+    ZIP_FILE="libfido2-${LIBFIDO2_VERSION}-win.zip"
 
     if [ ! -f "$ZIP_FILE" ]; then
         echo "Downloading $ZIP_URL"
         curl -fsSL -o "$ZIP_FILE" "$ZIP_URL"
     fi
 
-    UNZIP_DIR="libfido2-${LIBFIDO2_VERSION}-${YBOX_ARCH}"
+    UNZIP_DIR="libfido2-${LIBFIDO2_VERSION}-win"
     rm -rf "$UNZIP_DIR"
     unzip -q "$ZIP_FILE" -d "$UNZIP_DIR"
 
-    # Yubico's zip lays out {bin,include,lib} directly.
-    cp "$UNZIP_DIR"/*.lib "$OUT/lib/" 2>/dev/null || true
-    cp "$UNZIP_DIR"/*/*.lib "$OUT/lib/" 2>/dev/null || true
-    cp -r "$UNZIP_DIR"/include/* "$OUT/include/" 2>/dev/null || true
-    cp -r "$UNZIP_DIR"/*/include/* "$OUT/include/" 2>/dev/null || true
+    # Yubico's zip top-level dir is libfido2-<VERSION>-win/.  Under it:
+    #   <ARCH>/Release/v143/{static,dynamic}/  — MSVC v143 (VS 2022) toolset
+    #   include/                               — public headers
+    ZIP_ROOT="$UNZIP_DIR/libfido2-${LIBFIDO2_VERSION}-win"
+    STATIC_DIR="$ZIP_ROOT/$YBOX_SUBDIR/Release/v143/static"
+    DYNAMIC_DIR="$ZIP_ROOT/$YBOX_SUBDIR/Release/v143/dynamic"
+
+    if [ ! -d "$STATIC_DIR" ]; then
+        echo "ERROR: expected $STATIC_DIR to exist in Yubico's zip"
+        ls "$ZIP_ROOT" || true
+        exit 1
+    fi
+
+    # Static .lib files for offline linking.
+    cp "$STATIC_DIR"/*.lib "$OUT/lib/"
+    # Ship the DLL variants too — consumers using MinGW / LoadLibrary can
+    # pick these up.  Their presence makes the tarball useful for both
+    # static-link (MSVC) and dynamic-load (any) integrations.
+    mkdir -p "$OUT/lib/dynamic"
+    cp "$DYNAMIC_DIR"/*.dll "$OUT/lib/dynamic/" 2>/dev/null || true
+    cp "$DYNAMIC_DIR"/*.lib "$OUT/lib/dynamic/" 2>/dev/null || true
+
+    cp -r "$ZIP_ROOT/include"/* "$OUT/include/"
 
     # Attribution: fetch the upstream LICENSE at the pinned tag so the
     # Yubico prebuilt is packaged with the same license text as the
