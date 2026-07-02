@@ -209,6 +209,17 @@ if [[ "$PLATFORM" == windows-* ]]; then
     # Point it at our per-tree install prefixes.  On Windows libfido2
     # talks to hid.dll natively (see libfido2/src/hid_win.c), so hidapi
     # is neither built nor linked.
+    #
+    # LIBFIDO2_CFLAGS: libfido2 sets `-pedantic -Werror` on all its C
+    # sources.  Fine on Linux/mac where GCC's system-header handling
+    # exempts winnt-style anonymous structs / pragma pack idioms, but
+    # broken on Windows where MinGW's <winnt.h> uses both heavily and
+    # clang (or newer gcc) promotes them to errors under -pedantic.
+    # -Wno-error=c11-extensions covers the anonymous-struct/union case;
+    # -Wno-error=pragma-pack covers the pshpack*.h / poppack.h ranges;
+    # -Wno-error=deprecated-declarations covers libfido2's own use of
+    # OpenSSL 1.x APIs that OpenSSL 3.x has deprecated.
+    LIBFIDO2_CFLAGS="-Wno-error=c11-extensions -Wno-error=pragma-pack -Wno-error=deprecated-declarations"
     export PKG_CONFIG_PATH="$OPENSSL_PREFIX/lib/pkgconfig:$BUILD_DIR/libcbor-install-$PLATFORM/lib/pkgconfig"
     cmake ../"libfido2-${LIBFIDO2_VERSION}" \
         -G "MSYS Makefiles" \
@@ -221,6 +232,7 @@ if [[ "$PLATFORM" == windows-* ]]; then
         -DBUILD_MANPAGES=OFF \
         -DBUILD_EXAMPLES=OFF \
         -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
+        "-DCMAKE_C_FLAGS=$LIBFIDO2_CFLAGS" \
         "-DCBOR_INCLUDE_DIRS=$BUILD_DIR/libcbor-install-$PLATFORM/include" \
         "-DCBOR_LIBRARY_DIRS=$BUILD_DIR/libcbor-install-$PLATFORM/lib" \
         "-DCRYPTO_INCLUDE_DIRS=$OPENSSL_PREFIX/include" \
