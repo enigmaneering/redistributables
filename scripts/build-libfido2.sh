@@ -210,6 +210,22 @@ if [[ "$PLATFORM" == windows-* ]]; then
         curl -fsSL "https://github.com/Yubico/libfido2/archive/refs/tags/${LIBFIDO2_VERSION}.tar.gz" \
             | tar -xz
     fi
+
+    # libfido2's CMakeLists.txt hard-adds -Werror + -pedantic-errors + a
+    # bunch of specific -W flags via add_compile_options().  Those flags
+    # get APPENDED to every target after we've had our say in
+    # CMAKE_C_FLAGS, so command-line -Wno-error loses the ordering
+    # battle.  On Windows with clang, several of those warnings fire on
+    # mingw's own <winnt.h> / <string.h> / <pthread_time.h> and stop the
+    # build cold.  Simplest sustainable answer: strip -Werror and
+    # -pedantic-errors from the CMakeLists before configure runs.  We
+    # keep the -W* warnings so genuine libfido2 code issues still show up
+    # in the build log — just not promoted to hard errors.
+    sed -i \
+        -e 's/add_compile_options(-Werror)/# stripped: add_compile_options(-Werror)/g' \
+        -e 's/add_compile_options(-pedantic-errors)/# stripped: add_compile_options(-pedantic-errors)/g' \
+        "libfido2-${LIBFIDO2_VERSION}/CMakeLists.txt"
+
     mkdir -p "libfido2-build-$PLATFORM"
     cd "libfido2-build-$PLATFORM"
 
