@@ -1,21 +1,30 @@
 #!/bin/bash
 set -e
 
-# Build script for libfido2 + dependencies (libcbor, hidapi on Linux).
-# Outputs a relocatable package with static libraries and headers.
+# Build script for libfido2 + dependencies (libcbor + hidapi on Linux;
+# libcbor + OpenSSL on Windows).  Outputs a relocatable package with
+# static libraries and headers.
 #
 # Yubico's official FIDO2/CTAP2 library — powers YubiKey, Titan,
 # SoloKey, and every FIDO2-compatible security key.  libmental links
 # this to implement the FIDO2Authenticator surface.
 #
-# Windows: uses Yubico's official prebuilt zip (they ship one per
-#          release for x86, x64, arm64).
-# macOS:   builds libfido2 + libcbor from source with CMake.  Uses
-#          the LibreSSL that ships with macOS + IOKit-native HID
-#          transport (no hidapi needed).
-# Linux:   builds libfido2 + libcbor + hidapi from source with CMake.
-#          Links against system OpenSSL (available on every distro
-#          via libssl-dev / openssl-devel).
+# Every platform emits the same tarball layout:
+#     <tool>-<platform>/lib/{libfido2.a, libcbor.a, libcrypto.a[, libhidapi-hidraw.a]}
+#     <tool>-<platform>/include/{fido.h, fido/, openssl/[, hidapi/]}
+#     <tool>-<platform>/LICENSES/{libfido2, libcbor, openssl[, hidapi]}
+#
+# macOS:   source-build libfido2 + libcbor via CMake.  libcrypto + openssl
+#          headers come from Homebrew openssl@3.  HID uses IOKit natively.
+# Linux:   source-build libfido2 + libcbor + hidapi (hidraw backend) via
+#          CMake.  libcrypto + openssl headers come from libssl-dev.
+# Windows: source-build ALL FOUR (openssl + libcbor + libfido2) with the
+#          MSYS2 MinGW toolchain (mingw64 target for windows-amd64,
+#          mingwarm64 target for windows-arm64 via llvm-mingw cross-compile).
+#          Uses libfido2's native Windows hid.dll transport — no hidapi.
+#          Yubico's Windows prebuilt zip is deliberately NOT used: it
+#          ships MSVC-format .lib import stubs that MinGW's ld can't
+#          consume, which would leave libmental unable to link.
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BUILD_DIR="${BUILD_DIR:-$SCRIPT_DIR/../build}"
@@ -27,6 +36,7 @@ OUTPUT_DIR="${OUTPUT_DIR:-$SCRIPT_DIR/../output}"
 : "${LIBFIDO2_VERSION:=1.15.0}"
 : "${LIBCBOR_VERSION:=0.11.0}"
 : "${HIDAPI_VERSION:=hidapi-0.14.0}"
+: "${OPENSSL_VERSION:=3.6.3}"  # Windows-only; mac/linux use their system openssl
 
 # Detect platform
 if [[ "$OSTYPE" == "darwin"* ]]; then
@@ -62,71 +72,157 @@ OUT="$OUTPUT_DIR/libfido2-$PLATFORM"
 rm -rf "$OUT"
 mkdir -p "$OUT/lib" "$OUT/include" "$OUT/LICENSES"
 
-# --- Windows: use Yubico's prebuilt --------------------------------------
+# --- Windows: source-build the whole stack with MinGW --------------------
 #
-# As of libfido2 1.15.0, Yubico ships a SINGLE `libfido2-<VERSION>-win.zip`
-# containing all four Windows arches under top-level subdirs.  Older
-# releases (< 1.10) used per-arch zips like `-win64.zip` / `-win-arm64.zip`.
-# We pick the subdir matching the target platform and use its /static/
-# variant (MSVC-format .lib files — consumers linking with MinGW would
-# need to convert or ignore these; on the mental side WIN32 currently
-# short-circuits libfido2 to a stub, see mental/CMakeLists.txt).
+# We deliberately DON'T use Yubico's Windows prebuilt zip.  It ships MSVC
+# v143 static .lib files that MinGW's ld can't consume (COFF/OMF format
+# mismatch + missing thunks), which would prevent libmental from linking
+# on Windows.  Building from source with the same MinGW toolchain that
+# libmental itself uses produces GNU-format libfido2.a + libcbor.a +
+# libcrypto.a archives that link cleanly into the final static libmental.a.
+#
+# Two toolchain paths:
+#   windows-amd64: MSYS2 MINGW64 native (gcc, ar, ranlib on PATH)
+#   windows-arm64: llvm-mingw cross-compile (aarch64-w64-mingw32-clang etc.
+#                  on PATH — set up by the CI job, mirrors build-glslang.sh)
+#
+# OpenSSL 3.6.3 has native mingw64 + mingwarm64 Configure targets, so
+# both architectures get real static builds — no wrapper hacks.
 if [[ "$PLATFORM" == windows-* ]]; then
     case "$PLATFORM" in
-        windows-amd64) YBOX_SUBDIR="Win64" ;;
-        windows-arm64) YBOX_SUBDIR="ARM64" ;;
+        windows-amd64)
+            OPENSSL_TARGET="mingw64"
+            CROSS_PREFIX=""
+            CC_HOST="gcc"
+            AR_HOST="ar"
+            RANLIB_HOST="ranlib"
+            CMAKE_C_COMPILER_ID_FLAGS=""
+            ;;
+        windows-arm64)
+            OPENSSL_TARGET="mingwarm64"
+            CROSS_PREFIX="aarch64-w64-mingw32-"
+            CC_HOST="${CROSS_PREFIX}clang"
+            AR_HOST="${CROSS_PREFIX}ar"
+            RANLIB_HOST="${CROSS_PREFIX}ranlib"
+            CMAKE_C_COMPILER_ID_FLAGS="-DCMAKE_SYSTEM_NAME=Windows -DCMAKE_SYSTEM_PROCESSOR=aarch64"
+            ;;
         *) echo "Unknown Windows arch: $PLATFORM"; exit 1 ;;
     esac
 
-    ZIP_URL="https://developers.yubico.com/libfido2/Releases/libfido2-${LIBFIDO2_VERSION}-win.zip"
-    ZIP_FILE="libfido2-${LIBFIDO2_VERSION}-win.zip"
-
-    if [ ! -f "$ZIP_FILE" ]; then
-        echo "Downloading $ZIP_URL"
-        curl -fsSL -o "$ZIP_FILE" "$ZIP_URL"
+    # ---- 1. OpenSSL --------------------------------------------------
+    OPENSSL_TARBALL="openssl-${OPENSSL_VERSION}.tar.gz"
+    OPENSSL_SRC_DIR="openssl-${OPENSSL_VERSION}"
+    if [ ! -d "$OPENSSL_SRC_DIR" ]; then
+        echo "Fetching OpenSSL ${OPENSSL_VERSION}..."
+        curl -fsSL -o "$OPENSSL_TARBALL" \
+            "https://github.com/openssl/openssl/releases/download/openssl-${OPENSSL_VERSION}/openssl-${OPENSSL_VERSION}.tar.gz"
+        tar -xzf "$OPENSSL_TARBALL"
     fi
 
-    UNZIP_DIR="libfido2-${LIBFIDO2_VERSION}-win"
-    rm -rf "$UNZIP_DIR"
-    unzip -q "$ZIP_FILE" -d "$UNZIP_DIR"
+    OPENSSL_PREFIX="$BUILD_DIR/openssl-install-$PLATFORM"
+    mkdir -p "openssl-build-$PLATFORM"
+    cd "openssl-build-$PLATFORM"
 
-    # Yubico's zip top-level dir is libfido2-<VERSION>-win/.  Under it:
-    #   <ARCH>/Release/v143/{static,dynamic}/  — MSVC v143 (VS 2022) toolset
-    #   include/                               — public headers
-    ZIP_ROOT="$UNZIP_DIR/libfido2-${LIBFIDO2_VERSION}-win"
-    STATIC_DIR="$ZIP_ROOT/$YBOX_SUBDIR/Release/v143/static"
-    DYNAMIC_DIR="$ZIP_ROOT/$YBOX_SUBDIR/Release/v143/dynamic"
-
-    if [ ! -d "$STATIC_DIR" ]; then
-        echo "ERROR: expected $STATIC_DIR to exist in Yubico's zip"
-        ls "$ZIP_ROOT" || true
-        exit 1
+    # OpenSSL's Configure is not a shadow-build-friendly system; run it
+    # from inside the source tree and use --prefix to control install.
+    # `no-shared no-tests no-apps no-docs` cuts build time drastically
+    # while keeping libcrypto complete for libfido2's needs.
+    OPENSSL_CONFIGURE=(
+        "$OPENSSL_TARGET"
+        "no-shared"
+        "no-tests"
+        "no-apps"
+        "no-docs"
+        "no-legacy"
+        "--prefix=$OPENSSL_PREFIX"
+        "--libdir=lib"
+    )
+    if [ -n "$CROSS_PREFIX" ]; then
+        OPENSSL_CONFIGURE+=("--cross-compile-prefix=$CROSS_PREFIX")
     fi
+    echo "Configuring OpenSSL: ${OPENSSL_CONFIGURE[*]}"
+    perl "$BUILD_DIR/$OPENSSL_SRC_DIR/Configure" "${OPENSSL_CONFIGURE[@]}"
+    make -j "$NCPU" build_libs
+    make install_dev
+    cd "$BUILD_DIR"
 
-    # Static .lib files for offline linking.
-    cp "$STATIC_DIR"/*.lib "$OUT/lib/"
-    # Ship the DLL variants too — consumers using MinGW / LoadLibrary can
-    # pick these up.  Their presence makes the tarball useful for both
-    # static-link (MSVC) and dynamic-load (any) integrations.
-    mkdir -p "$OUT/lib/dynamic"
-    cp "$DYNAMIC_DIR"/*.dll "$OUT/lib/dynamic/" 2>/dev/null || true
-    cp "$DYNAMIC_DIR"/*.lib "$OUT/lib/dynamic/" 2>/dev/null || true
+    # ---- 2. libcbor --------------------------------------------------
+    if [ ! -d "libcbor-${LIBCBOR_VERSION}" ]; then
+        echo "Fetching libcbor v${LIBCBOR_VERSION}..."
+        curl -fsSL "https://github.com/PJK/libcbor/archive/refs/tags/v${LIBCBOR_VERSION}.tar.gz" \
+            | tar -xz
+    fi
+    mkdir -p "libcbor-build-$PLATFORM"
+    cd "libcbor-build-$PLATFORM"
+    cmake ../"libcbor-${LIBCBOR_VERSION}" \
+        -G "MSYS Makefiles" \
+        -DCMAKE_C_COMPILER="$CC_HOST" \
+        -DCMAKE_AR="$(command -v $AR_HOST)" \
+        -DCMAKE_RANLIB="$(command -v $RANLIB_HOST)" \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DBUILD_SHARED_LIBS=OFF \
+        -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
+        -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
+        -DCMAKE_INSTALL_PREFIX="$BUILD_DIR/libcbor-install-$PLATFORM" \
+        $CMAKE_C_COMPILER_ID_FLAGS
+    cmake --build . -j "$NCPU"
+    cmake --install .
+    cd "$BUILD_DIR"
 
-    cp -r "$ZIP_ROOT/include"/* "$OUT/include/"
+    # ---- 3. libfido2 -------------------------------------------------
+    if [ ! -d "libfido2-${LIBFIDO2_VERSION}" ]; then
+        echo "Fetching libfido2 v${LIBFIDO2_VERSION}..."
+        curl -fsSL "https://github.com/Yubico/libfido2/archive/refs/tags/${LIBFIDO2_VERSION}.tar.gz" \
+            | tar -xz
+    fi
+    mkdir -p "libfido2-build-$PLATFORM"
+    cd "libfido2-build-$PLATFORM"
 
-    # Attribution: fetch the upstream LICENSE at the pinned tag so the
-    # Yubico prebuilt is packaged with the same license text as the
-    # source builds on macOS/Linux.
-    curl -fsSL -o "$OUT/LICENSES/libfido2-LICENSE" \
-        "https://raw.githubusercontent.com/Yubico/libfido2/${LIBFIDO2_VERSION}/LICENSE" || true
-    curl -fsSL -o "$OUT/LICENSES/libcbor-LICENSE" \
-        "https://raw.githubusercontent.com/PJK/libcbor/v${LIBCBOR_VERSION}/LICENSE.md" || true
+    # libfido2's CMake uses pkg-config to find libcrypto / libcbor.
+    # Point it at our per-tree install prefixes.  On Windows libfido2
+    # talks to hid.dll natively (see libfido2/src/hid_win.c), so hidapi
+    # is neither built nor linked.
+    export PKG_CONFIG_PATH="$OPENSSL_PREFIX/lib/pkgconfig:$BUILD_DIR/libcbor-install-$PLATFORM/lib/pkgconfig"
+    cmake ../"libfido2-${LIBFIDO2_VERSION}" \
+        -G "MSYS Makefiles" \
+        -DCMAKE_C_COMPILER="$CC_HOST" \
+        -DCMAKE_AR="$(command -v $AR_HOST)" \
+        -DCMAKE_RANLIB="$(command -v $RANLIB_HOST)" \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DBUILD_SHARED_LIBS=OFF \
+        -DBUILD_TOOLS=OFF \
+        -DBUILD_MANPAGES=OFF \
+        -DBUILD_EXAMPLES=OFF \
+        -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
+        "-DCBOR_INCLUDE_DIRS=$BUILD_DIR/libcbor-install-$PLATFORM/include" \
+        "-DCBOR_LIBRARY_DIRS=$BUILD_DIR/libcbor-install-$PLATFORM/lib" \
+        "-DCRYPTO_INCLUDE_DIRS=$OPENSSL_PREFIX/include" \
+        "-DCRYPTO_LIBRARY_DIRS=$OPENSSL_PREFIX/lib" \
+        $CMAKE_C_COMPILER_ID_FLAGS
+    cmake --build . -j "$NCPU"
+
+    # ---- Package -----------------------------------------------------
+    cp src/libfido2.a "$OUT/lib/"
+    cp "$BUILD_DIR/libcbor-install-$PLATFORM/lib/libcbor.a" "$OUT/lib/"
+    cp "$OPENSSL_PREFIX/lib/libcrypto.a" "$OUT/lib/"
+
+    # Headers
+    cp -r "$BUILD_DIR/libfido2-${LIBFIDO2_VERSION}/src/fido.h" "$OUT/include/"
+    cp -r "$BUILD_DIR/libfido2-${LIBFIDO2_VERSION}/src/fido"   "$OUT/include/"
+    mkdir -p "$OUT/include/openssl"
+    cp -R "$OPENSSL_PREFIX/include/openssl/." "$OUT/include/openssl/"
+
+    # Licenses
+    cp "$BUILD_DIR/libfido2-${LIBFIDO2_VERSION}/LICENSE"    "$OUT/LICENSES/libfido2-LICENSE"
+    cp "$BUILD_DIR/libcbor-${LIBCBOR_VERSION}/LICENSE.md"   "$OUT/LICENSES/libcbor-LICENSE"
+    cp "$BUILD_DIR/openssl-${OPENSSL_VERSION}/LICENSE.txt"  "$OUT/LICENSES/openssl-LICENSE"
 
     cd "$OUTPUT_DIR"
     tar -czf "libfido2-${PLATFORM}.tar.gz" "libfido2-$PLATFORM"
     echo "Created: libfido2-${PLATFORM}.tar.gz"
 
-    echo "Windows package extracted to $OUT"
+    echo "Windows source-build package built at $OUT"
+    ls -la "$OUT/lib" "$OUT/include" 2>&1 || true
     exit 0
 fi
 

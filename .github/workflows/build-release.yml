@@ -162,6 +162,12 @@ jobs:
           git clone --depth 1 --branch 1.15.0 https://github.com/Yubico/libfido2.git libfido2
           git clone --depth 1 --branch v0.11.0 https://github.com/PJK/libcbor.git libcbor
           git clone --depth 1 --branch hidapi-0.14.0 https://github.com/libusb/hidapi.git hidapi
+          # OpenSSL: bundled inside every Windows libfido2 tarball
+          # (source-built with MinGW so libmental gets GNU-format .a).
+          # macOS/Linux use the host's OpenSSL, but the LICENSE we ship
+          # comes from the pinned source tree, so verify against the same
+          # release tag.
+          git clone --depth 1 --branch openssl-3.6.3 https://github.com/openssl/openssl.git openssl
           # Mesa: only the spirv-to-dxil carve-out lands in our packages,
           # but the umbrella license text is what consumers reference.
           # Pin to the same release tag the build script uses so a Mesa
@@ -206,6 +212,7 @@ jobs:
           EXPECTED_LIBFIDO2="e8946152897134a9e9205b0db0659dd77c279de683d7cc64465629a12d1abfd8"
           EXPECTED_LIBCBOR="6a5e182d758db66ecad6e6fa304dc637d4d2585bafceb5003c86e8dc9f6344ff"
           EXPECTED_HIDAPI="7d3b087c34f35d4d538e3bcddd1ff8f66e92f9ef336881999482800ddf840913"
+          EXPECTED_OPENSSL="7d5450cb2d142651b8afa315b5f238efc805dad827d91ba367d8516bc9d49e7a"
 
           FAILED=0
           CHANGES=""
@@ -238,6 +245,7 @@ jobs:
           check "libfido2" libfido2/LICENSE "$EXPECTED_LIBFIDO2"
           check "libcbor" libcbor/LICENSE.md "$EXPECTED_LIBCBOR"
           check "hidapi" hidapi/LICENSE.txt "$EXPECTED_HIDAPI"
+          check "OpenSSL" openssl/LICENSE.txt "$EXPECTED_OPENSSL"
 
           echo "CHANGES<<EOF" >> $GITHUB_ENV
           echo -e "$CHANGES" >> $GITHUB_ENV
@@ -505,9 +513,11 @@ jobs:
           - os: windows-latest
             runner: windows-latest
             platform: windows-amd64
+            mingw_arch: x86_64
           - os: windows-latest
             runner: windows-latest
             platform: windows-arm64
+            mingw_arch: x86_64
             cross_compile_target: aarch64
     runs-on: ${{ matrix.runner }}
     steps:
@@ -534,6 +544,43 @@ jobs:
           # dep explicitly so a runner-image rev never breaks the build.
           brew install openssl@3 pkg-config cmake
 
+      - name: Setup MinGW (Windows)
+        if: matrix.mingw_arch
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: false
+          cache: true
+          install: >-
+            mingw-w64-${{ matrix.mingw_arch }}-gcc
+            mingw-w64-${{ matrix.mingw_arch }}-cmake
+            mingw-w64-${{ matrix.mingw_arch }}-make
+            mingw-w64-${{ matrix.mingw_arch }}-pkgconf
+            mingw-w64-${{ matrix.mingw_arch }}-perl
+            mingw-w64-${{ matrix.mingw_arch }}-clang
+            mingw-w64-${{ matrix.mingw_arch }}-lld
+            git
+            make
+            perl
+
+      - name: Cache llvm-mingw
+        if: matrix.cross_compile_target == 'aarch64'
+        id: cache-llvm-mingw-libfido2
+        uses: actions/cache@v4
+        with:
+          path: llvm-mingw-20260311-ucrt-x86_64
+          key: llvm-mingw-20260311-ucrt-x86_64
+
+      - name: Download llvm-mingw for aarch64 cross-compile (Windows arm64)
+        if: matrix.cross_compile_target == 'aarch64' && steps.cache-llvm-mingw-libfido2.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          # llvm-mingw provides aarch64-w64-mingw32-clang / -ar / -ranlib on PATH.
+          # Same version pin as build-glslang's cross-compile step so the
+          # cached archive is shared.
+          curl -L -o llvm-mingw.zip https://github.com/mstorsjo/llvm-mingw/releases/download/20260311/llvm-mingw-20260311-ucrt-x86_64.zip
+          unzip -q llvm-mingw.zip
+
       - name: Build libfido2 (macOS/Linux)
         if: ${{ !startsWith(matrix.platform, 'windows-') }}
         shell: bash
@@ -544,10 +591,16 @@ jobs:
           MACOS_ARCH="${{ matrix.macos_arch || '' }}" \
           bash scripts/build-libfido2.sh
 
-      - name: Build libfido2 (Windows — Yubico prebuilt)
+      - name: Build libfido2 (Windows — MinGW static)
         if: startsWith(matrix.platform, 'windows-')
-        shell: bash
+        shell: msys2 {0}
         run: |
+          # Prepend llvm-mingw to PATH for the aarch64 cross-compile case.
+          # For windows-amd64 the CROSS_COMPILE_TARGET var stays empty and
+          # the script uses the MSYS2 MINGW64 native gcc.
+          if [ -n "${{ matrix.cross_compile_target || '' }}" ]; then
+            export PATH="/d/a/redistributables/redistributables/llvm-mingw-20260311-ucrt-x86_64/bin:$PATH"
+          fi
           chmod +x scripts/build-libfido2.sh
           BUILD_DIR="${{ runner.temp }}/build" \
           OUTPUT_DIR="${{ runner.temp }}/output" \

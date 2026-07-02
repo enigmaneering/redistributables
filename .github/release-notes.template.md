@@ -42,7 +42,7 @@ Each tool is packaged separately:
 - `llvm-{platform}.tar.gz` / `.zip`
 - `spirv-llvm-translator-{platform}.tar.gz` / `.zip`
 - `wgpu-{platform}.tar.gz`
-- `libfido2-{platform}.tar.gz` (bundles static libfido2.a + libcbor.a + libcrypto.a + fido/openssl headers; hidapi statically linked on Linux; Windows uses Yubico's official prebuilt)
+- `libfido2-{platform}.tar.gz` (bundles static libfido2.a + libcbor.a + libcrypto.a + fido/openssl headers; hidapi statically linked on Linux; Windows source-built with MinGW so it links cleanly into MinGW-family consumers)
 
 ## 📝 License
 
