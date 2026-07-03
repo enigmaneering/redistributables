@@ -336,6 +336,17 @@ fi
 
 # --- macOS / Linux: build from source ------------------------------------
 
+# macOS cross-compilation: `-DCMAKE_OSX_ARCHITECTURES=$MACOS_ARCH` is
+# what tells clang to emit code for a different target arch than the
+# host (macos-14 runners are ARM64, but we build darwin-amd64 there via
+# MACOS_ARCH=x86_64 — same pattern build-glslang.sh, build-clspv.sh, etc.
+# use).  Threads through every cmake call below.
+CMAKE_OSX_ARCH_FLAG=""
+if [[ "$PLATFORM" == darwin-* ]] && [ -n "$MACOS_ARCH" ]; then
+    CMAKE_OSX_ARCH_FLAG="-DCMAKE_OSX_ARCHITECTURES=$MACOS_ARCH"
+    echo "Cross-compile flag: $CMAKE_OSX_ARCH_FLAG"
+fi
+
 # 1. libcbor — dependency of libfido2
 if [ ! -d "libcbor-${LIBCBOR_VERSION}" ]; then
     echo "Fetching libcbor v${LIBCBOR_VERSION}..."
@@ -349,7 +360,8 @@ cmake ../"libcbor-${LIBCBOR_VERSION}" \
     -DBUILD_SHARED_LIBS=OFF \
     -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
     -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
-    -DCMAKE_INSTALL_PREFIX="$BUILD_DIR/libcbor-install-$PLATFORM"
+    -DCMAKE_INSTALL_PREFIX="$BUILD_DIR/libcbor-install-$PLATFORM" \
+    $CMAKE_OSX_ARCH_FLAG
 cmake --build . -j "$NCPU"
 cmake --install .
 cd "$BUILD_DIR"
@@ -386,7 +398,8 @@ if [[ "$PLATFORM" == linux-* ]]; then
         -DHIDAPI_WITH_LIBUSB=OFF \
         -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
         -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
-        -DCMAKE_INSTALL_PREFIX="$BUILD_DIR/hidapi-install-$PLATFORM"
+        -DCMAKE_INSTALL_PREFIX="$BUILD_DIR/hidapi-install-$PLATFORM" \
+        $CMAKE_OSX_ARCH_FLAG
     cmake --build . -j "$NCPU"
     cmake --install .
     cd "$BUILD_DIR"
@@ -417,6 +430,11 @@ if [[ "$PLATFORM" == linux-* ]]; then
         "-DHIDAPI_INCLUDE_DIRS=$BUILD_DIR/hidapi-install-$PLATFORM/include/hidapi"
         "-DHIDAPI_LIBRARY_DIRS=$BUILD_DIR/hidapi-install-$PLATFORM/lib"
     )
+fi
+
+# Same cross-compile flag threaded through the libfido2 build.
+if [ -n "$CMAKE_OSX_ARCH_FLAG" ]; then
+    CMAKE_ARGS+=("$CMAKE_OSX_ARCH_FLAG")
 fi
 
 export PKG_CONFIG_PATH="$BUILD_DIR/libcbor-install-$PLATFORM/lib/pkgconfig:${PKG_CONFIG_PATH:-}"
@@ -458,16 +476,54 @@ cp -r "$BUILD_DIR/libfido2-${LIBFIDO2_VERSION}/src/fido" "$OUT/include/"
 #        Debian/Ubuntu multiarch puts it under /usr/lib/<triplet>/.
 mkdir -p "$OUT/include/openssl"
 if [[ "$PLATFORM" == darwin-* ]]; then
-    OPENSSL_PREFIX="$(brew --prefix openssl@3 2>/dev/null || echo /opt/homebrew/opt/openssl@3)"
+    # If we're cross-compiling (target arch != host arch), brew's
+    # openssl@3 is the WRONG arch (arm64 on macos-14 runners) and would
+    # produce a mismatched-arch libcrypto.a that fails downstream links
+    # with "Undefined symbols for architecture x86_64" — the exact
+    # failure that prompted this refactor.  Source-build OpenSSL for
+    # the target arch instead.  Native builds (MACOS_ARCH empty or
+    # matching host) keep using brew for speed.
+    HOST_ARCH="$(uname -m | sed 's/x86_64/amd64/; s/aarch64/arm64/')"
+    TARGET_ARCH="${MACOS_ARCH:-$(uname -m)}"
+    TARGET_ARCH_NORM="$(echo "$TARGET_ARCH" | sed 's/x86_64/amd64/; s/aarch64/arm64/')"
+    if [ -n "$MACOS_ARCH" ] && [ "$HOST_ARCH" != "$TARGET_ARCH_NORM" ]; then
+        echo "Cross-compiling OpenSSL for $TARGET_ARCH..."
+        case "$TARGET_ARCH" in
+            x86_64|amd64) OSSL_TARGET="darwin64-x86_64-cc" ;;
+            arm64|aarch64) OSSL_TARGET="darwin64-arm64-cc" ;;
+            *) echo "ERROR: unsupported target arch: $TARGET_ARCH"; exit 1 ;;
+        esac
+        OSSL_TARBALL="openssl-${OPENSSL_VERSION}.tar.gz"
+        OSSL_SRC_DIR="openssl-${OPENSSL_VERSION}"
+        if [ ! -d "$BUILD_DIR/$OSSL_SRC_DIR" ]; then
+            (cd "$BUILD_DIR" && curl -fsSL -o "$OSSL_TARBALL" \
+                "https://github.com/openssl/openssl/releases/download/openssl-${OPENSSL_VERSION}/openssl-${OPENSSL_VERSION}.tar.gz" \
+                && tar -xzf "$OSSL_TARBALL")
+        fi
+        OSSL_PREFIX="$BUILD_DIR/openssl-install-$PLATFORM"
+        mkdir -p "$BUILD_DIR/openssl-build-$PLATFORM"
+        (cd "$BUILD_DIR/openssl-build-$PLATFORM" \
+            && perl "$BUILD_DIR/$OSSL_SRC_DIR/Configure" "$OSSL_TARGET" \
+                no-shared no-tests no-apps no-docs no-legacy \
+                --prefix="$OSSL_PREFIX" --libdir=lib \
+            && make -j "$NCPU" build_libs \
+            && make install_dev)
+        OPENSSL_PREFIX="$OSSL_PREFIX"
+        OPENSSL_LICENSE_SRC="$BUILD_DIR/$OSSL_SRC_DIR/LICENSE.txt"
+    else
+        OPENSSL_PREFIX="$(brew --prefix openssl@3 2>/dev/null || echo /opt/homebrew/opt/openssl@3)"
+        OPENSSL_LICENSE_SRC=""
+    fi
     if [ -f "$OPENSSL_PREFIX/lib/libcrypto.a" ]; then
         cp "$OPENSSL_PREFIX/lib/libcrypto.a" "$OUT/lib/"
     else
         echo "ERROR: could not find libcrypto.a under $OPENSSL_PREFIX/lib"
-        echo "       brew install openssl@3"
         exit 1
     fi
     cp -R "$OPENSSL_PREFIX/include/openssl/." "$OUT/include/openssl/"
-    if [ -f "$OPENSSL_PREFIX/LICENSE.txt" ]; then
+    if [ -n "$OPENSSL_LICENSE_SRC" ] && [ -f "$OPENSSL_LICENSE_SRC" ]; then
+        cp "$OPENSSL_LICENSE_SRC" "$OUT/LICENSES/openssl-LICENSE"
+    elif [ -f "$OPENSSL_PREFIX/LICENSE.txt" ]; then
         cp "$OPENSSL_PREFIX/LICENSE.txt" "$OUT/LICENSES/openssl-LICENSE"
     elif [ -f "$OPENSSL_PREFIX/LICENSE" ]; then
         cp "$OPENSSL_PREFIX/LICENSE" "$OUT/LICENSES/openssl-LICENSE"
