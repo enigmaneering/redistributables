@@ -137,12 +137,14 @@ if [[ "$PLATFORM" == windows-* ]]; then
             ;;
         windows-arm64)
             OPENSSL_TARGET="mingwarm64"
-            # CLANGARM64 provides clang as "cc"/"gcc" (both are aliases)
-            # and native ar/ranlib.  No cross-compile flags needed —
-            # we're building on aarch64 for aarch64.
-            CC_HOST="gcc"
-            AR_HOST="ar"
-            RANLIB_HOST="ranlib"
+            # CLANGARM64 ships clang + llvm-{ar,ranlib} directly —
+            # unlike MINGW64 it doesn't provide a gcc alias, so we
+            # reference the real tool names.  OpenSSL's mingwarm64
+            # Configure target defaults to CC=gcc; we override further
+            # down (see the OpenSSL Configure invocation).
+            CC_HOST="clang"
+            AR_HOST="llvm-ar"
+            RANLIB_HOST="llvm-ranlib"
             CMAKE_C_COMPILER_ID_FLAGS=""
             ;;
         *) echo "Unknown Windows arch: $PLATFORM"; exit 1 ;;
@@ -177,12 +179,16 @@ if [[ "$PLATFORM" == windows-* ]]; then
         "--libdir=lib"
     )
     # Append extra CFLAGS positionally — OpenSSL's Configure treats
-    # any positional arg that starts with `-` as a compiler flag and
-    # appends it to CFLAGS.  Both windows-amd64 (MINGW64) and
-    # windows-arm64 (CLANGARM64) build natively — OpenSSL's mingw64 /
-    # mingwarm64 target's default CC=gcc resolves to the msys2
-    # environment's own gcc (which is clang on CLANGARM64), so no
-    # explicit CC override or --cross-compile-prefix is needed.
+    # any positional arg starting with `CC=`, `AR=`, etc. gets picked
+    # up by Configure and used verbatim.  MINGW64 has a gcc alias so
+    # mingw64's default works; CLANGARM64 does NOT, so we override.
+    if [ "$CC_HOST" != "gcc" ]; then
+        OPENSSL_CONFIGURE+=(
+            "CC=$CC_HOST"
+            "AR=$AR_HOST"
+            "RANLIB=$RANLIB_HOST"
+        )
+    fi
     echo "Configuring OpenSSL: ${OPENSSL_CONFIGURE[*]}"
     "$PERL_BIN" "$BUILD_DIR/$OPENSSL_SRC_DIR/Configure" "${OPENSSL_CONFIGURE[@]}"
     make -j "$NCPU" build_libs
