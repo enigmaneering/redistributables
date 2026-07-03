@@ -268,23 +268,16 @@ if [[ "$PLATFORM" == windows-* ]]; then
     # sources.  We strip -Werror from CMakeLists.txt above; -Wno-error
     # is a belt-and-suspenders for anything the sed might miss.
     #
-    # -DHAVE_CLOCK_GETTIME behaviour differs between the two Windows
-    # msystems:
-    #   MINGW64 (windows-amd64):   <time.h> exposes clock_gettime under
-    #     its plain name (from libwinpthread).  Force HAVE_CLOCK_GETTIME=1
-    #     to skip libfido2's own openbsd-compat shim (which would
-    #     otherwise collide with the header's declaration).
-    #   CLANGARM64 (windows-arm64): <time.h> renames clock_gettime to
-    #     clock_gettime64 for 64-bit-time_t safety, but no library in
-    #     the aarch64 mingw runtime provides clock_gettime64.  Enabling
-    #     the macro would produce a libfido2.a that references an
-    #     undefined symbol.  So DO NOT set HAVE_CLOCK_GETTIME on arm64
-    #     — let libfido2's openbsd-compat shim compile in.  The shim
-    #     calls GetTickCount64, a Windows API always available.
-    LIBFIDO2_CFLAGS="-Wno-error"
-    if [ "$PLATFORM" = "windows-amd64" ]; then
-        LIBFIDO2_CFLAGS="$LIBFIDO2_CFLAGS -DHAVE_CLOCK_GETTIME=1"
-    fi
+    # -DHAVE_CLOCK_GETTIME=1 skips libfido2's own openbsd-compat shim
+    # (which would collide with mingw-w64's <time.h> declarations on
+    # both MINGW64 and CLANGARM64 — the shim declares clock_gettime as
+    # an ordinary function, the header declares it as an inline).
+    # On CLANGARM64 the compiled objects reference clock_gettime64
+    # (aliased by <time.h>) which no aarch64 mingw runtime library
+    # provides; libmental's Windows arm64 build supplies a shim under
+    # that symbol name to close the gap.  Keeps libfido2 uniform across
+    # both Windows msystems.
+    LIBFIDO2_CFLAGS="-Wno-error -DHAVE_CLOCK_GETTIME=1"
     export PKG_CONFIG_PATH="$OPENSSL_PREFIX/lib/pkgconfig:$BUILD_DIR/libcbor-install-$PLATFORM/lib/pkgconfig"
     cmake ../"libfido2-${LIBFIDO2_VERSION}" \
         -G "MSYS Makefiles" \
