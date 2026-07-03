@@ -64,16 +64,47 @@ if [ ! -d "glslang" ]; then
     git clone --depth 1 --branch "$GLSLANG_VERSION" https://github.com/KhronosGroup/glslang.git
 fi
 
-# Clone SPIRV-Tools
-if [ ! -d "spirv-tools" ]; then
-    echo "Cloning SPIRV-Tools..."
-    git clone --depth 1 https://github.com/KhronosGroup/SPIRV-Tools.git spirv-tools
+# Resolve SPIRV-Tools + SPIRV-Headers SHAs from glslang's own
+# known_good.json instead of tracking upstream `main`.  The former
+# guarantees glslang can consume whatever enum/API surface those repos
+# expose; the latter breaks periodically when SPIRV-Tools adds new
+# enum values that glslang's own generated switch statements don't
+# handle yet (SPV_OPERAND_TYPE_GATHER_MODES was the trigger that
+# prompted this fix — glslang 16.3.0 predated it and the resulting
+# core_tables_body.inc had `use of undeclared identifier` errors).
+KNOWN_GOOD="glslang/known_good.json"
+if [ -f "$KNOWN_GOOD" ]; then
+    SPIRV_TOOLS_SHA=$(python3 -c "import json; d=json.load(open('$KNOWN_GOOD')); print(next(c['commit'] for c in d['commits'] if c['name']=='spirv-tools'))")
+    SPIRV_HEADERS_SHA=$(python3 -c "import json; d=json.load(open('$KNOWN_GOOD')); print(next(c['commit'] for c in d['commits'] if c['name']=='spirv-tools/external/spirv-headers'))")
+    echo "known_good.json — SPIRV-Tools: $SPIRV_TOOLS_SHA"
+    echo "                  SPIRV-Headers: $SPIRV_HEADERS_SHA"
+else
+    echo "WARNING: glslang/known_good.json missing; falling back to main"
+    SPIRV_TOOLS_SHA=""
+    SPIRV_HEADERS_SHA=""
 fi
 
-# Clone SPIRV-Headers (needed by SPIRV-Tools)
+# Clone SPIRV-Tools at the known-good SHA (fall back to main if the
+# JSON was missing — old behaviour, kept for safety).
+if [ ! -d "spirv-tools" ]; then
+    echo "Cloning SPIRV-Tools..."
+    if [ -n "$SPIRV_TOOLS_SHA" ]; then
+        git clone https://github.com/KhronosGroup/SPIRV-Tools.git spirv-tools
+        (cd spirv-tools && git checkout "$SPIRV_TOOLS_SHA")
+    else
+        git clone --depth 1 https://github.com/KhronosGroup/SPIRV-Tools.git spirv-tools
+    fi
+fi
+
+# Clone SPIRV-Headers (needed by SPIRV-Tools) at the known-good SHA.
 if [ ! -d "spirv-tools/external/spirv-headers" ]; then
     echo "Cloning SPIRV-Headers..."
-    git clone --depth 1 https://github.com/KhronosGroup/SPIRV-Headers.git spirv-tools/external/spirv-headers
+    if [ -n "$SPIRV_HEADERS_SHA" ]; then
+        git clone https://github.com/KhronosGroup/SPIRV-Headers.git spirv-tools/external/spirv-headers
+        (cd spirv-tools/external/spirv-headers && git checkout "$SPIRV_HEADERS_SHA")
+    else
+        git clone --depth 1 https://github.com/KhronosGroup/SPIRV-Headers.git spirv-tools/external/spirv-headers
+    fi
 fi
 
 # Create symlink for glslang to find SPIRV-Tools
