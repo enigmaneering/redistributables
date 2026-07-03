@@ -411,6 +411,56 @@ if [ ! -d "libfido2-${LIBFIDO2_VERSION}" ]; then
     curl -fsSL "https://github.com/Yubico/libfido2/archive/refs/tags/${LIBFIDO2_VERSION}.tar.gz" \
         | tar -xz
 fi
+
+# Strip regress/ subdir and -Werror/-pedantic-errors from libfido2's
+# CMakeLists so the build doesn't fail on the test binaries or on
+# harmless compiler warnings.  Windows already did this inside its own
+# branch; moving it out so mac + linux get the same treatment (on
+# darwin-amd64 cross-compile the regress test binaries were link-failing
+# because they were being auto-linked against the host arch's brew
+# openssl regardless of what libfido2.a itself did).  Use `sed -i.bak`
+# for portability between BSD (macOS) and GNU sed; the .bak files stay
+# in the build tree, invisible to consumers.
+sed -i.bak \
+    -e 's/add_compile_options(-Werror)/# stripped: add_compile_options(-Werror)/g' \
+    -e 's/add_compile_options(-pedantic-errors)/# stripped: add_compile_options(-pedantic-errors)/g' \
+    -e 's/add_subdirectory(regress)/# stripped: add_subdirectory(regress)/g' \
+    "libfido2-${LIBFIDO2_VERSION}/CMakeLists.txt"
+
+# On darwin cross-compile we need OpenSSL for the TARGET arch, not the
+# host arch's brew openssl — otherwise libfido2's CMake auto-detects
+# brew's arm64 libcrypto and links it into an x86_64 build, producing
+# link-time "Undefined symbols for architecture x86_64" downstream.
+# Build OpenSSL from source now so we can point libfido2 at it below.
+FIDO2_CROSS_OPENSSL_PREFIX=""
+if [[ "$PLATFORM" == darwin-* ]] && [ -n "$MACOS_ARCH" ]; then
+    HOST_ARCH_NORM="$(uname -m | sed 's/x86_64/amd64/; s/aarch64/arm64/')"
+    TARGET_ARCH_NORM="$(echo "$MACOS_ARCH" | sed 's/x86_64/amd64/; s/aarch64/arm64/')"
+    if [ "$HOST_ARCH_NORM" != "$TARGET_ARCH_NORM" ]; then
+        echo "Cross-compile detected — building OpenSSL for $MACOS_ARCH..."
+        case "$MACOS_ARCH" in
+            x86_64|amd64)  OSSL_TARGET="darwin64-x86_64-cc" ;;
+            arm64|aarch64) OSSL_TARGET="darwin64-arm64-cc" ;;
+            *) echo "ERROR: unsupported target arch: $MACOS_ARCH"; exit 1 ;;
+        esac
+        if [ ! -d "$BUILD_DIR/openssl-${OPENSSL_VERSION}" ]; then
+            (cd "$BUILD_DIR" && curl -fsSL -o "openssl-${OPENSSL_VERSION}.tar.gz" \
+                "https://github.com/openssl/openssl/releases/download/openssl-${OPENSSL_VERSION}/openssl-${OPENSSL_VERSION}.tar.gz" \
+                && tar -xzf "openssl-${OPENSSL_VERSION}.tar.gz")
+        fi
+        FIDO2_CROSS_OPENSSL_PREFIX="$BUILD_DIR/openssl-install-$PLATFORM"
+        if [ ! -f "$FIDO2_CROSS_OPENSSL_PREFIX/lib/libcrypto.a" ]; then
+            mkdir -p "$BUILD_DIR/openssl-build-$PLATFORM"
+            (cd "$BUILD_DIR/openssl-build-$PLATFORM" \
+                && perl "$BUILD_DIR/openssl-${OPENSSL_VERSION}/Configure" "$OSSL_TARGET" \
+                    no-shared no-tests no-apps no-docs no-legacy \
+                    --prefix="$FIDO2_CROSS_OPENSSL_PREFIX" --libdir=lib \
+                && make -j "$NCPU" build_libs \
+                && make install_dev)
+        fi
+    fi
+fi
+
 mkdir -p "libfido2-build-$PLATFORM"
 cd "libfido2-build-$PLATFORM"
 
@@ -432,12 +482,23 @@ if [[ "$PLATFORM" == linux-* ]]; then
     )
 fi
 
-# Same cross-compile flag threaded through the libfido2 build.
+# Cross-compile flag + explicit CRYPTO paths when we built our own
+# target-arch OpenSSL above.  Without CRYPTO_{INCLUDE,LIBRARY}_DIRS,
+# libfido2's CMake falls back to pkg-config / brew autodetection which
+# picks the WRONG arch on cross-builds.
 if [ -n "$CMAKE_OSX_ARCH_FLAG" ]; then
     CMAKE_ARGS+=("$CMAKE_OSX_ARCH_FLAG")
 fi
+if [ -n "$FIDO2_CROSS_OPENSSL_PREFIX" ]; then
+    CMAKE_ARGS+=(
+        "-DCRYPTO_INCLUDE_DIRS=$FIDO2_CROSS_OPENSSL_PREFIX/include"
+        "-DCRYPTO_LIBRARY_DIRS=$FIDO2_CROSS_OPENSSL_PREFIX/lib"
+    )
+    export PKG_CONFIG_PATH="$FIDO2_CROSS_OPENSSL_PREFIX/lib/pkgconfig:$BUILD_DIR/libcbor-install-$PLATFORM/lib/pkgconfig:${PKG_CONFIG_PATH:-}"
+else
+    export PKG_CONFIG_PATH="$BUILD_DIR/libcbor-install-$PLATFORM/lib/pkgconfig:${PKG_CONFIG_PATH:-}"
+fi
 
-export PKG_CONFIG_PATH="$BUILD_DIR/libcbor-install-$PLATFORM/lib/pkgconfig:${PKG_CONFIG_PATH:-}"
 cmake ../"libfido2-${LIBFIDO2_VERSION}" "${CMAKE_ARGS[@]}"
 cmake --build . -j "$NCPU"
 
@@ -476,40 +537,13 @@ cp -r "$BUILD_DIR/libfido2-${LIBFIDO2_VERSION}/src/fido" "$OUT/include/"
 #        Debian/Ubuntu multiarch puts it under /usr/lib/<triplet>/.
 mkdir -p "$OUT/include/openssl"
 if [[ "$PLATFORM" == darwin-* ]]; then
-    # If we're cross-compiling (target arch != host arch), brew's
-    # openssl@3 is the WRONG arch (arm64 on macos-14 runners) and would
-    # produce a mismatched-arch libcrypto.a that fails downstream links
-    # with "Undefined symbols for architecture x86_64" — the exact
-    # failure that prompted this refactor.  Source-build OpenSSL for
-    # the target arch instead.  Native builds (MACOS_ARCH empty or
-    # matching host) keep using brew for speed.
-    HOST_ARCH="$(uname -m | sed 's/x86_64/amd64/; s/aarch64/arm64/')"
-    TARGET_ARCH="${MACOS_ARCH:-$(uname -m)}"
-    TARGET_ARCH_NORM="$(echo "$TARGET_ARCH" | sed 's/x86_64/amd64/; s/aarch64/arm64/')"
-    if [ -n "$MACOS_ARCH" ] && [ "$HOST_ARCH" != "$TARGET_ARCH_NORM" ]; then
-        echo "Cross-compiling OpenSSL for $TARGET_ARCH..."
-        case "$TARGET_ARCH" in
-            x86_64|amd64) OSSL_TARGET="darwin64-x86_64-cc" ;;
-            arm64|aarch64) OSSL_TARGET="darwin64-arm64-cc" ;;
-            *) echo "ERROR: unsupported target arch: $TARGET_ARCH"; exit 1 ;;
-        esac
-        OSSL_TARBALL="openssl-${OPENSSL_VERSION}.tar.gz"
-        OSSL_SRC_DIR="openssl-${OPENSSL_VERSION}"
-        if [ ! -d "$BUILD_DIR/$OSSL_SRC_DIR" ]; then
-            (cd "$BUILD_DIR" && curl -fsSL -o "$OSSL_TARBALL" \
-                "https://github.com/openssl/openssl/releases/download/openssl-${OPENSSL_VERSION}/openssl-${OPENSSL_VERSION}.tar.gz" \
-                && tar -xzf "$OSSL_TARBALL")
-        fi
-        OSSL_PREFIX="$BUILD_DIR/openssl-install-$PLATFORM"
-        mkdir -p "$BUILD_DIR/openssl-build-$PLATFORM"
-        (cd "$BUILD_DIR/openssl-build-$PLATFORM" \
-            && perl "$BUILD_DIR/$OSSL_SRC_DIR/Configure" "$OSSL_TARGET" \
-                no-shared no-tests no-apps no-docs no-legacy \
-                --prefix="$OSSL_PREFIX" --libdir=lib \
-            && make -j "$NCPU" build_libs \
-            && make install_dev)
-        OPENSSL_PREFIX="$OSSL_PREFIX"
-        OPENSSL_LICENSE_SRC="$BUILD_DIR/$OSSL_SRC_DIR/LICENSE.txt"
+    # Two cases:
+    #   1. Cross-compile — FIDO2_CROSS_OPENSSL_PREFIX was populated
+    #      above with a target-arch source-built OpenSSL.  Reuse it.
+    #   2. Native — use brew's openssl@3 (fast, same arch as target).
+    if [ -n "$FIDO2_CROSS_OPENSSL_PREFIX" ]; then
+        OPENSSL_PREFIX="$FIDO2_CROSS_OPENSSL_PREFIX"
+        OPENSSL_LICENSE_SRC="$BUILD_DIR/openssl-${OPENSSL_VERSION}/LICENSE.txt"
     else
         OPENSSL_PREFIX="$(brew --prefix openssl@3 2>/dev/null || echo /opt/homebrew/opt/openssl@3)"
         OPENSSL_LICENSE_SRC=""
