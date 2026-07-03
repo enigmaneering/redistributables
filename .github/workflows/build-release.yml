@@ -424,8 +424,27 @@ jobs:
           mkdir -p wasm-build && cd wasm-build
 
           git clone --depth 1 --branch "$GLSLANG_VERSION" https://github.com/KhronosGroup/glslang.git
-          git clone --depth 1 https://github.com/KhronosGroup/SPIRV-Tools.git spirv-tools
-          git clone --depth 1 https://github.com/KhronosGroup/SPIRV-Headers.git spirv-tools/external/spirv-headers
+
+          # Pin SPIRV-Tools + SPIRV-Headers to the SHAs glslang lists
+          # in its own known_good.json instead of tracking `main`.
+          # Tracking main broke recently when SPIRV-Tools added
+          # SPV_OPERAND_TYPE_GATHER_MODES and glslang 16.3.0's generated
+          # core_tables_body.inc failed to compile.  Same fix build-glslang.sh
+          # applies for the native builds.
+          if [ -f glslang/known_good.json ]; then
+            SPIRV_TOOLS_SHA=$(python3 -c "import json; d=json.load(open('glslang/known_good.json')); print(next(c['commit'] for c in d['commits'] if c['name']=='spirv-tools'))")
+            SPIRV_HEADERS_SHA=$(python3 -c "import json; d=json.load(open('glslang/known_good.json')); print(next(c['commit'] for c in d['commits'] if c['name']=='spirv-tools/external/spirv-headers'))")
+            echo "SPIRV-Tools SHA:   $SPIRV_TOOLS_SHA"
+            echo "SPIRV-Headers SHA: $SPIRV_HEADERS_SHA"
+            git clone https://github.com/KhronosGroup/SPIRV-Tools.git spirv-tools
+            (cd spirv-tools && git checkout "$SPIRV_TOOLS_SHA")
+            git clone https://github.com/KhronosGroup/SPIRV-Headers.git spirv-tools/external/spirv-headers
+            (cd spirv-tools/external/spirv-headers && git checkout "$SPIRV_HEADERS_SHA")
+          else
+            echo "WARNING: glslang/known_good.json missing; falling back to main"
+            git clone --depth 1 https://github.com/KhronosGroup/SPIRV-Tools.git spirv-tools
+            git clone --depth 1 https://github.com/KhronosGroup/SPIRV-Headers.git spirv-tools/external/spirv-headers
+          fi
           mkdir -p glslang/External
           ln -sf ../../spirv-tools glslang/External/spirv-tools
 
