@@ -38,19 +38,24 @@ OUTPUT_DIR="${OUTPUT_DIR:-$SCRIPT_DIR/../output}"
 : "${HIDAPI_VERSION:=hidapi-0.14.0}"
 : "${OPENSSL_VERSION:=3.6.3}"  # Windows-only; mac/linux use their system openssl
 
-# Detect platform
-if [[ "$OSTYPE" == "darwin"* ]]; then
+# Detect platform.
+#
+# PLATFORM_OVERRIDE lets the CI workflow pass matrix.platform in
+# verbatim (e.g. "windows-arm64") so we don't depend on uname -m
+# giving the right answer.  That matters on windows-11-arm runners
+# where MSYS2's uname reports the host arch as x86_64 even inside
+# a CLANGARM64 msystem — leading builds to configure OpenSSL with
+# the mingw64 (x86_64) target when we actually wanted mingwarm64.
+if [ -n "$PLATFORM_OVERRIDE" ]; then
+    PLATFORM="$PLATFORM_OVERRIDE"
+elif [[ "$OSTYPE" == "darwin"* ]]; then
     ARCH=$(uname -m)
     if [ -n "$MACOS_ARCH" ]; then ARCH="$MACOS_ARCH"; fi
     PLATFORM="darwin-$ARCH"
 elif [[ "$OSTYPE" == "linux-gnu"* ]]; then
     PLATFORM="linux-$(uname -m)"
 elif [[ "$OSTYPE" == "msys" || "$OSTYPE" == "win32" || "$OSTYPE" == "cygwin" ]]; then
-    if [ -n "$CROSS_COMPILE_TARGET" ]; then
-        ARCH="$CROSS_COMPILE_TARGET"
-    else
-        ARCH=$(uname -m)
-    fi
+    ARCH=$(uname -m)
     PLATFORM="windows-$ARCH"
 fi
 PLATFORM=$(echo "$PLATFORM" | sed 's/x86_64/amd64/g' | sed 's/aarch64/arm64/g')

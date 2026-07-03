@@ -614,9 +614,14 @@ jobs:
           # Both windows-amd64 (MINGW64 x86_64) and windows-arm64
           # (CLANGARM64 aarch64) build natively in their own msys2
           # environment — no cross-compile, no PATH juggling.
+          # PLATFORM_OVERRIDE bypasses uname-based arch detection:
+          # msys2/setup-msys2 on windows-11-arm sometimes reports the
+          # host arch as x86_64 even inside a CLANGARM64 msystem, and
+          # we'd end up with a mingw64 build instead of mingwarm64.
           chmod +x scripts/build-libfido2.sh
           BUILD_DIR="${{ runner.temp }}/build" \
           OUTPUT_DIR="${{ runner.temp }}/output" \
+          PLATFORM_OVERRIDE="${{ matrix.platform }}" \
           bash scripts/build-libfido2.sh
 
       - name: Upload artifact
