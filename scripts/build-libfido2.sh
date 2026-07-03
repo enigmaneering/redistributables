@@ -268,15 +268,23 @@ if [[ "$PLATFORM" == windows-* ]]; then
     # sources.  We strip -Werror from CMakeLists.txt above; -Wno-error
     # is a belt-and-suspenders for anything the sed might miss.
     #
-    # -DHAVE_CLOCK_GETTIME: libfido2's openbsd-compat layer provides a
-    # clock_gettime() shim gated behind #if !defined(HAVE_CLOCK_GETTIME).
-    # On Windows cross-compile CMake's try_compile-based feature
-    # detection doesn't reliably discover that mingw-w64 provides
-    # clock_gettime (via <pthread_time.h>), so the shim gets compiled
-    # and collides with the real declaration.  Force the macro on and
-    # the shim is a no-op.  Mingw-w64 has provided clock_gettime since
-    # around 2013 on both amd64 and aarch64 targets.
-    LIBFIDO2_CFLAGS="-Wno-error -DHAVE_CLOCK_GETTIME=1"
+    # -DHAVE_CLOCK_GETTIME behaviour differs between the two Windows
+    # msystems:
+    #   MINGW64 (windows-amd64):   <time.h> exposes clock_gettime under
+    #     its plain name (from libwinpthread).  Force HAVE_CLOCK_GETTIME=1
+    #     to skip libfido2's own openbsd-compat shim (which would
+    #     otherwise collide with the header's declaration).
+    #   CLANGARM64 (windows-arm64): <time.h> renames clock_gettime to
+    #     clock_gettime64 for 64-bit-time_t safety, but no library in
+    #     the aarch64 mingw runtime provides clock_gettime64.  Enabling
+    #     the macro would produce a libfido2.a that references an
+    #     undefined symbol.  So DO NOT set HAVE_CLOCK_GETTIME on arm64
+    #     — let libfido2's openbsd-compat shim compile in.  The shim
+    #     calls GetTickCount64, a Windows API always available.
+    LIBFIDO2_CFLAGS="-Wno-error"
+    if [ "$PLATFORM" = "windows-amd64" ]; then
+        LIBFIDO2_CFLAGS="$LIBFIDO2_CFLAGS -DHAVE_CLOCK_GETTIME=1"
+    fi
     export PKG_CONFIG_PATH="$OPENSSL_PREFIX/lib/pkgconfig:$BUILD_DIR/libcbor-install-$PLATFORM/lib/pkgconfig"
     cmake ../"libfido2-${LIBFIDO2_VERSION}" \
         -G "MSYS Makefiles" \
