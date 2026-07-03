@@ -116,18 +116,20 @@ if [[ "$PLATFORM" == windows-* ]]; then
     export PATH="/usr/bin:$PATH"
     PERL_BIN="/usr/bin/perl"
 
-    # Prevent MSYS2's MINGW64 environment from leaking amd64 header
-    # search paths into aarch64-w64-mingw32-clang.  MSYS2 sets these
-    # to /mingw64/include etc. for its native environment; when clang
-    # is cross-compiling to aarch64, it will happily consume them and
-    # produce object files that reference amd64 struct layouts.  The
-    # explicit unset forces clang to use its own sysroot for headers.
-    unset CPATH C_INCLUDE_PATH CPLUS_INCLUDE_PATH LIBRARY_PATH
-
+    # windows-arm64 was previously cross-compiled from an x86_64 runner
+    # using llvm-mingw.  That produced a libfido2.a whose object files
+    # referenced clock_gettime64 (llvm-mingw's <time.h> aliases
+    # clock_gettime for Y2038 safety), but the downstream consumer
+    # libmental is built natively in MSYS2 CLANGARM64 whose runtime
+    # doesn't provide clock_gettime64 — the two toolchains disagreed
+    # on the C runtime ABI.  Fix: build both windows-{amd64,arm64}
+    # natively in their matching MSYS2 environment.  windows-amd64
+    # uses MINGW64 (x86_64 gcc); windows-arm64 uses CLANGARM64 (aarch64
+    # clang) on a windows-11-arm runner.  Same toolchain family as
+    # libmental, so no ABI drift.
     case "$PLATFORM" in
         windows-amd64)
             OPENSSL_TARGET="mingw64"
-            CROSS_PREFIX=""
             CC_HOST="gcc"
             AR_HOST="ar"
             RANLIB_HOST="ranlib"
@@ -135,23 +137,13 @@ if [[ "$PLATFORM" == windows-* ]]; then
             ;;
         windows-arm64)
             OPENSSL_TARGET="mingwarm64"
-            CROSS_PREFIX="aarch64-w64-mingw32-"
-            # Use generic clang + explicit target/sysroot rather than
-            # the aarch64-w64-mingw32-clang wrapper.  The wrapper
-            # relies on its argv[0] to resolve its sysroot, but in the
-            # MSYS2 MINGW64 shell the MSYSTEM_PREFIX env var causes it
-            # to add /mingw64/lib to the linker search path anyway —
-            # so ld.lld picks up MSYS2's amd64 libkernel32.a instead
-            # of llvm-mingw's aarch64 one.  Explicit --sysroot + --target
-            # via CFLAGS/LDFLAGS bypasses the wrapper entirely and is
-            # what build-glslang.sh uses for the same cross-compile.
-            LLVM_MINGW_DIR="$(cd "$SCRIPT_DIR/../llvm-mingw-20260311-ucrt-x86_64" && pwd)"
-            LLVM_MINGW_SYSROOT_WIN="$(cygpath -m "$LLVM_MINGW_DIR")"
-            CC_HOST="clang"
-            AR_HOST="llvm-ar"
-            RANLIB_HOST="llvm-ranlib"
-            CROSS_CFLAGS="--target=aarch64-w64-mingw32 --sysroot=${LLVM_MINGW_SYSROOT_WIN}"
-            CMAKE_C_COMPILER_ID_FLAGS="-DCMAKE_SYSTEM_NAME=Windows -DCMAKE_SYSTEM_PROCESSOR=aarch64"
+            # CLANGARM64 provides clang as "cc"/"gcc" (both are aliases)
+            # and native ar/ranlib.  No cross-compile flags needed —
+            # we're building on aarch64 for aarch64.
+            CC_HOST="gcc"
+            AR_HOST="ar"
+            RANLIB_HOST="ranlib"
+            CMAKE_C_COMPILER_ID_FLAGS=""
             ;;
         *) echo "Unknown Windows arch: $PLATFORM"; exit 1 ;;
     esac
@@ -186,25 +178,11 @@ if [[ "$PLATFORM" == windows-* ]]; then
     )
     # Append extra CFLAGS positionally — OpenSSL's Configure treats
     # any positional arg that starts with `-` as a compiler flag and
-    # appends it to CFLAGS.  This is how build-glslang.sh threads the
-    # cross-compile target/sysroot in.
-    if [ -n "${CROSS_CFLAGS:-}" ]; then
-        # For arm64 we use generic clang + explicit --target/--sysroot;
-        # override CC and archiver tools too so mingwarm64's default
-        # "gcc" doesn't get picked up.
-        OPENSSL_CONFIGURE+=(
-            "CC=$CC_HOST"
-            "AR=$AR_HOST"
-            "RANLIB=$RANLIB_HOST"
-        )
-        # Split CROSS_CFLAGS on spaces so each token becomes its own
-        # positional arg.
-        for tok in $CROSS_CFLAGS; do
-            OPENSSL_CONFIGURE+=("$tok")
-        done
-    elif [ -n "$CROSS_PREFIX" ]; then
-        OPENSSL_CONFIGURE+=("--cross-compile-prefix=$CROSS_PREFIX")
-    fi
+    # appends it to CFLAGS.  Both windows-amd64 (MINGW64) and
+    # windows-arm64 (CLANGARM64) build natively — OpenSSL's mingw64 /
+    # mingwarm64 target's default CC=gcc resolves to the msys2
+    # environment's own gcc (which is clang on CLANGARM64), so no
+    # explicit CC override or --cross-compile-prefix is needed.
     echo "Configuring OpenSSL: ${OPENSSL_CONFIGURE[*]}"
     "$PERL_BIN" "$BUILD_DIR/$OPENSSL_SRC_DIR/Configure" "${OPENSSL_CONFIGURE[@]}"
     make -j "$NCPU" build_libs
@@ -228,7 +206,6 @@ if [[ "$PLATFORM" == windows-* ]]; then
         -DBUILD_SHARED_LIBS=OFF \
         -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
         -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
-        "-DCMAKE_C_FLAGS=${CROSS_CFLAGS:-}" \
         -DCMAKE_INSTALL_PREFIX="$BUILD_DIR/libcbor-install-$PLATFORM" \
         $CMAKE_C_COMPILER_ID_FLAGS
     cmake --build . -j "$NCPU"
@@ -288,7 +265,7 @@ if [[ "$PLATFORM" == windows-* ]]; then
     # and collides with the real declaration.  Force the macro on and
     # the shim is a no-op.  Mingw-w64 has provided clock_gettime since
     # around 2013 on both amd64 and aarch64 targets.
-    LIBFIDO2_CFLAGS="-Wno-error -DHAVE_CLOCK_GETTIME=1 ${CROSS_CFLAGS:-}"
+    LIBFIDO2_CFLAGS="-Wno-error -DHAVE_CLOCK_GETTIME=1"
     export PKG_CONFIG_PATH="$OPENSSL_PREFIX/lib/pkgconfig:$BUILD_DIR/libcbor-install-$PLATFORM/lib/pkgconfig"
     cmake ../"libfido2-${LIBFIDO2_VERSION}" \
         -G "MSYS Makefiles" \

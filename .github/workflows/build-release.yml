@@ -532,12 +532,33 @@ jobs:
           - os: windows-latest
             runner: windows-latest
             platform: windows-amd64
-            mingw_arch: x86_64
-          - os: windows-latest
-            runner: windows-latest
+            msystem: MINGW64
+            libfido2_packages: >-
+              mingw-w64-x86_64-gcc
+              mingw-w64-x86_64-cmake
+              mingw-w64-x86_64-make
+              mingw-w64-x86_64-pkgconf
+              mingw-w64-x86_64-perl
+              mingw-w64-x86_64-clang
+              mingw-w64-x86_64-lld
+          - os: windows-11-arm
+            runner: windows-11-arm
             platform: windows-arm64
-            mingw_arch: x86_64
-            cross_compile_target: aarch64
+            msystem: CLANGARM64
+            # Native ARM64 build in MSYS2 CLANGARM64 msystem — the
+            # same toolchain family libmental itself uses.  Previously
+            # libfido2's windows-arm64 tarball was cross-compiled with
+            # llvm-mingw, which produced .a files calling clock_gettime
+            # while CLANGARM64's <time.h> aliases clock_gettime to
+            # clock_gettime64.  Symbol mismatch caused every downstream
+            # link of libmental to fail with undefined-symbol errors.
+            # Building natively here keeps both sides on identical
+            # runtime ABI.
+            libfido2_packages: >-
+              mingw-w64-clang-aarch64-toolchain
+              mingw-w64-clang-aarch64-cmake
+              mingw-w64-clang-aarch64-make
+              mingw-w64-clang-aarch64-pkgconf
     runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v4
@@ -563,55 +584,18 @@ jobs:
           # dep explicitly so a runner-image rev never breaks the build.
           brew install openssl@3 pkg-config cmake
 
-      - name: Setup MinGW (Windows)
-        if: matrix.mingw_arch
+      - name: Setup MSYS2 (Windows)
+        if: matrix.msystem
         uses: msys2/setup-msys2@v2
         with:
-          msystem: MINGW64
+          msystem: ${{ matrix.msystem }}
           update: false
           cache: true
           install: >-
-            mingw-w64-${{ matrix.mingw_arch }}-gcc
-            mingw-w64-${{ matrix.mingw_arch }}-cmake
-            mingw-w64-${{ matrix.mingw_arch }}-make
-            mingw-w64-${{ matrix.mingw_arch }}-pkgconf
-            mingw-w64-${{ matrix.mingw_arch }}-perl
-            mingw-w64-${{ matrix.mingw_arch }}-clang
-            mingw-w64-${{ matrix.mingw_arch }}-lld
+            ${{ matrix.libfido2_packages }}
             git
             make
             perl
-
-      - name: Cache llvm-mingw
-        if: matrix.cross_compile_target == 'aarch64'
-        id: cache-llvm-mingw-libfido2
-        uses: actions/cache@v4
-        with:
-          path: llvm-mingw-20260311-ucrt-x86_64
-          key: llvm-mingw-20260311-ucrt-x86_64
-
-      - name: Download llvm-mingw for aarch64 cross-compile (Windows arm64)
-        if: matrix.cross_compile_target == 'aarch64' && steps.cache-llvm-mingw-libfido2.outputs.cache-hit != 'true'
-        shell: bash
-        run: |
-          # llvm-mingw provides aarch64-w64-mingw32-clang / -ar / -ranlib on PATH.
-          # Same version pin as build-glslang's cross-compile step so the
-          # cached archive is shared.
-          curl -L -o llvm-mingw.zip https://github.com/mstorsjo/llvm-mingw/releases/download/20260311/llvm-mingw-20260311-ucrt-x86_64.zip
-          unzip -q llvm-mingw.zip
-
-      - name: Setup ARM64 sysroot (Windows arm64)
-        if: matrix.cross_compile_target == 'aarch64'
-        shell: bash
-        run: |
-          # Drop llvm-mingw's aarch64-w64-mingw32 sysroot into MSYS2's
-          # mingw64 tree so the aarch64-w64-mingw32-clang toolchain
-          # driver finds its own libkernel32.a / libmingw32.a there
-          # instead of MSYS2's amd64 ones (which would produce
-          # "machine type x64 conflicts with arm64" from ld.lld).
-          # Same trick build-glslang uses for its own cross-compile.
-          mkdir -p D:/a/_temp/msys64/mingw64/aarch64-w64-mingw32
-          cp -r llvm-mingw-20260311-ucrt-x86_64/aarch64-w64-mingw32/* D:/a/_temp/msys64/mingw64/aarch64-w64-mingw32/
 
       - name: Build libfido2 (macOS/Linux)
         if: ${{ !startsWith(matrix.platform, 'windows-') }}
@@ -623,20 +607,16 @@ jobs:
           MACOS_ARCH="${{ matrix.macos_arch || '' }}" \
           bash scripts/build-libfido2.sh
 
-      - name: Build libfido2 (Windows — MinGW static)
+      - name: Build libfido2 (Windows — MSYS2 native)
         if: startsWith(matrix.platform, 'windows-')
         shell: msys2 {0}
         run: |
-          # Prepend llvm-mingw to PATH for the aarch64 cross-compile case.
-          # For windows-amd64 the CROSS_COMPILE_TARGET var stays empty and
-          # the script uses the MSYS2 MINGW64 native gcc.
-          if [ -n "${{ matrix.cross_compile_target || '' }}" ]; then
-            export PATH="/d/a/redistributables/redistributables/llvm-mingw-20260311-ucrt-x86_64/bin:$PATH"
-          fi
+          # Both windows-amd64 (MINGW64 x86_64) and windows-arm64
+          # (CLANGARM64 aarch64) build natively in their own msys2
+          # environment — no cross-compile, no PATH juggling.
           chmod +x scripts/build-libfido2.sh
           BUILD_DIR="${{ runner.temp }}/build" \
           OUTPUT_DIR="${{ runner.temp }}/output" \
-          CROSS_COMPILE_TARGET="${{ matrix.cross_compile_target || '' }}" \
           bash scripts/build-libfido2.sh
 
       - name: Upload artifact
