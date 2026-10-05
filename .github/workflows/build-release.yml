@@ -34,22 +34,27 @@ jobs:
           fi
 
   # ================================================================
-  #  Resolve all three upstream commits we'll build against in ONE
+  #  Resolve the three upstream commits we'll build against in ONE
   #  atomic step.  Doing this together (rather than per-build) eliminates
-  #  a real race: clspv main can move between separate resolutions, and
-  #  if our LLVM SHA comes from a DIFFERENT clspv tree than the one we
-  #  later build, we ship LLVM that doesn't match the clspv we shipped.
+  #  a real race: if our LLVM SHA came from a DIFFERENT clspv tree than
+  #  the one we later build, we'd ship LLVM that doesn't match the clspv
+  #  we shipped.
   #
   #  Resolution order:
-  #    1. clspv main HEAD             — drives our clspv build
-  #    2. LLVM SHA from clspv@HEAD's  — drives our LLVM build, transitively
-  #       deps.json                     pinned to the SAME clspv tree we
-  #                                     resolved in step 1
-  #    3. SPIRV-LLVM-Translator main  — its main branch tracks LLVM main
-  #       HEAD                          like clspv's pin, so co-evolves
+  #    1. clspv: the CLSPV_SHA pin in CURRENT_VERSIONS.txt (the ONE place
+  #       the LLVM family is pinned; the file says why it is held)
+  #    2. LLVM: the commit clspv's deps.json names AT that pin — and it
+  #       must equal the file's LLVM_SHA, so a half-edited bump fails
+  #       here, before any of the multi-hour builds starts. LLVM_SHA is
+  #       what every e.json and generated kernel header downstream names
+  #       (enigmatic's `e fetch clang` installs the clang-<platform>
+  #       asset built from it).
+  #    3. SPIRV-LLVM-Translator main HEAD — its main tracks LLVM main
+  #       like clspv's pin does, so it co-evolves. The only floating
+  #       input of the LLVM family.
   #
   #  All three SHAs feed cache keys for their respective builds, so any
-  #  upstream movement automatically invalidates the cache.
+  #  movement automatically invalidates the cache.
   # ================================================================
   determine-shas:
     name: Resolve upstream commits
@@ -59,25 +64,28 @@ jobs:
       clspv_sha: ${{ steps.resolve.outputs.clspv_sha }}
       translator_sha: ${{ steps.resolve.outputs.translator_sha }}
     steps:
+      - uses: actions/checkout@v4
+
       - id: resolve
         run: |
           set -e
 
-          # Pinned clspv SHA — last known-working commit (2026-05-08).
-          # Upstream libclc's CMake API churned post-May-8 in a way that
-          # rejects our LLVM_DEFAULT_TARGET_TRIPLE=clspv-- trick with
-          # "Unknown libclc target architecture: clspv".  Until that's
-          # diagnosed, we hold at the SHA that produced the last green
-          # release rather than chase main HEAD daily.  Bump deliberately
-          # by editing this constant once the libclc target-triple issue
-          # is understood and a fix lands either upstream or in
-          # build-clspv.sh.
-          CLSPV_SHA=f781210fc173488f3136d7013e9a04d6c110eb07
+          CLSPV_SHA=$(sed -n 's/^CLSPV_SHA=//p' CURRENT_VERSIONS.txt | tr -d '\r ')
+          PINNED_LLVM_SHA=$(sed -n 's/^LLVM_SHA=//p' CURRENT_VERSIONS.txt | tr -d '\r ')
+          if [ -z "$CLSPV_SHA" ] || [ -z "$PINNED_LLVM_SHA" ]; then
+            echo "::error::CURRENT_VERSIONS.txt must carry CLSPV_SHA= and LLVM_SHA= (the hand-maintained pins)"
+            exit 1
+          fi
 
           # Read deps.json AT the pinned clspv SHA — keeps LLVM matched
           # to the clspv tree we're actually building.
           LLVM_SHA=$(curl -sSLf "https://raw.githubusercontent.com/google/clspv/$CLSPV_SHA/deps.json" \
             | python3 -c 'import json,sys; d=json.load(sys.stdin); print(next(c["commit"] for c in d["commits"] if c["name"]=="llvm"))')
+
+          if [ "$LLVM_SHA" != "$PINNED_LLVM_SHA" ]; then
+            echo "::error::CURRENT_VERSIONS.txt says LLVM_SHA=$PINNED_LLVM_SHA but clspv $CLSPV_SHA pins LLVM $LLVM_SHA — edit the file so the two agree (both lines move together on a bump)"
+            exit 1
+          fi
 
           TRANSLATOR_SHA=$(curl -sSLf https://api.github.com/repos/KhronosGroup/SPIRV-LLVM-Translator/commits/main \
             | python3 -c 'import json,sys; print(json.load(sys.stdin)["sha"])')
@@ -99,9 +107,9 @@ jobs:
 
           {
             echo "## Pinned upstream commits"
-            echo "- clspv: \`$CLSPV_SHA\`"
-            echo "- LLVM: \`$LLVM_SHA\` (from clspv deps.json @ pinned commit)"
-            echo "- SPIRV-LLVM-Translator: \`$TRANSLATOR_SHA\`"
+            echo "- clspv: \`$CLSPV_SHA\` (CURRENT_VERSIONS.txt)"
+            echo "- LLVM: \`$LLVM_SHA\` (from clspv deps.json @ pinned commit; equals CURRENT_VERSIONS.txt LLVM_SHA)"
+            echo "- SPIRV-LLVM-Translator: \`$TRANSLATOR_SHA\` (main HEAD, floating)"
           } >> "$GITHUB_STEP_SUMMARY"
 
   # ================================================================
@@ -207,6 +215,11 @@ jobs:
           EXPECTED_CLSPV="2050d82ea19614989deac39163c471b6e753659dfd4e4e88c6f724624db59f32"
           EXPECTED_LLVM="8d85c1057d742e597985c7d4e6320b015a9139385cff4cbae06ffc0ebe89afee"
           EXPECTED_CLANG="ebcd9bbf783a73d05c53ba4d586b8d5813dcdf3bbec50265860ccc885e606f47"
+          # lld joined the native LLVM build (its archives ship in the dev
+          # kit, its driver in the slim clang asset); its LICENSE.TXT is the
+          # same Apache-2.0 WITH LLVM-exception text with its own legacy
+          # copyright line, hence its own hash.
+          EXPECTED_LLD="f7891568956e34643eb6a0db1462db30820d40d7266e2a78063f2fe233ece5a0"
           EXPECTED_SPIRV_TRANSLATOR="e3bc36440fc927c62d5cc24efeefe225a14d4e34ffeb0c92e430625cce9ee444"
           EXPECTED_MESA="0d1a0472ecc81830e75c20d59b0ea02841e3db21255e0ebad97ab682c54d6615"
           EXPECTED_LIBFIDO2="e8946152897134a9e9205b0db0659dd77c279de683d7cc64465629a12d1abfd8"
@@ -240,6 +253,7 @@ jobs:
           check "clspv" clspv/LICENSE "$EXPECTED_CLSPV"
           check "LLVM" llvm-project/llvm/LICENSE.TXT "$EXPECTED_LLVM"
           check "Clang" llvm-project/clang/LICENSE.TXT "$EXPECTED_CLANG"
+          check "LLD" llvm-project/lld/LICENSE.TXT "$EXPECTED_LLD"
           check "SPIRV-LLVM-Translator" spirv-llvm-translator/LICENSE.TXT "$EXPECTED_SPIRV_TRANSLATOR"
           check "Mesa (spirv-to-dxil)" mesa/docs/license.rst "$EXPECTED_MESA"
           check "libfido2" libfido2/LICENSE "$EXPECTED_LIBFIDO2"
@@ -943,7 +957,15 @@ jobs:
         id: cache-llvm
         uses: actions/cache@v4
         with:
-          path: ${{ runner.temp }}/output/llvm-${{ matrix.platform }}.*
+          # Both deliverables of one build: the dev kit and, on the six
+          # native platforms, the slim clang asset plus its report. The
+          # clang glob matches nothing on wasm, which actions/cache
+          # tolerates as long as one path matches. Without the second line
+          # a cache hit would skip the build and the clang upload below
+          # would find nothing.
+          path: |
+            ${{ runner.temp }}/output/llvm-${{ matrix.platform }}.*
+            ${{ runner.temp }}/output/clang-${{ matrix.platform }}.*
           # Include the resolved LLVM SHA so a clspv bump (which changes the
           # SHA) invalidates the cache automatically — otherwise we'd ship
           # stale LLVM against a clspv that expects new APIs.
@@ -953,7 +975,9 @@ jobs:
           # would serve a binary built for the wrong arch.  Empty on
           # non-Windows platforms; doesn't affect their key uniqueness
           # since matrix.platform is already distinct.
-          key: llvm-${{ matrix.platform }}-${{ needs.determine-shas.outputs.llvm_sha }}-${{ matrix.mingw_pkg_prefix }}-${{ hashFiles('scripts/build-llvm.sh', 'scripts/common.sh') }}
+          # package-clang.sh is in the key because it decides what the
+          # cached clang asset contains.
+          key: llvm-${{ matrix.platform }}-${{ needs.determine-shas.outputs.llvm_sha }}-${{ matrix.mingw_pkg_prefix }}-${{ hashFiles('scripts/build-llvm.sh', 'scripts/common.sh', 'scripts/package-clang.sh') }}
 
       - name: Install dependencies (Linux ARM64)
         if: steps.cache-llvm.outputs.cache-hit != 'true' && matrix.platform == 'linux-arm64'
@@ -1016,6 +1040,21 @@ jobs:
         with:
           name: llvm-${{ matrix.platform }}
           path: ${{ runner.temp }}/output/llvm-${{ matrix.platform }}.*
+
+      # The slim clang asset — clang-<platform>.tar.gz — comes out of the
+      # same build (scripts/package-clang.sh, run by build-llvm.sh on the
+      # native platforms) and its report .txt rides along for the release
+      # job's summary. A missing tarball is an error, never a silent skip:
+      # a release without all six is a release e cannot pin.
+      - name: Upload slim clang
+        if: matrix.platform != 'wasm'
+        uses: actions/upload-artifact@v4
+        with:
+          name: clang-${{ matrix.platform }}
+          path: |
+            ${{ runner.temp }}/output/clang-${{ matrix.platform }}.tar.gz
+            ${{ runner.temp }}/output/clang-${{ matrix.platform }}.report.txt
+          if-no-files-found: error
 
   build-clspv:
     needs: [build-llvm, determine-shas]
@@ -1530,7 +1569,7 @@ jobs:
 
   create-release:
     name: Create External Binaries Release
-    needs: [determine-version]
+    needs: [determine-version, determine-shas]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -1541,15 +1580,100 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           path: artifacts
-          pattern: '{glslang,spirv-cross,spirv-to-dxil,naga,wgpu,llvm,clspv,spirv-llvm-translator,libfido2}-*'
+          # clang-* is the slim toolchain asset; it does not collide with
+          # clspv-* (the pattern is matched against whole artifact names).
+          pattern: '{glslang,spirv-cross,spirv-to-dxil,naga,wgpu,llvm,clang,clspv,spirv-llvm-translator,libfido2}-*'
 
       - name: Display artifact structure
         run: ls -R artifacts
 
+      # Everything that can make the release short is checked BEFORE the
+      # release record exists. Until now a 2 GiB overflow surfaced only as
+      # a failed upload in the loop below, after `gh release create`, which
+      # left a half-populated tag that e's fetch could resolve as "latest".
+      - name: Verify assets before the release exists
+        env:
+          LLVM_SHA: ${{ needs.determine-shas.outputs.llvm_sha }}
+          # The slim clang's own cap (the gameplan's 100 MiB; the per-platform
+          # report in the step summary says what each one really weighs).
+          CLANG_ASSET_MAX_BYTES: "104857600"
+        run: |
+          set -eo pipefail
+          shopt -s globstar nullglob
+          GITHUB_ASSET_CAP=2147483648   # GitHub's per-asset limit: 2 GiB
+          FAILED=0
+
+          for f in artifacts/**/*.tar.gz artifacts/**/*.zip; do
+            size=$(wc -c < "$f")
+            if [ "$size" -ge "$GITHUB_ASSET_CAP" ]; then
+              echo "::error::$(basename "$f") is $size bytes — at or over GitHub's 2 GiB asset cap; it would fail to upload"
+              FAILED=1
+            fi
+          done
+
+          {
+            echo "## Slim clang assets"
+            echo
+            echo "| asset | bytes | MiB |"
+            echo "|---|---:|---:|"
+          } >> "$GITHUB_STEP_SUMMARY"
+          n=0
+          for f in artifacts/**/clang-*.tar.gz; do
+            n=$((n + 1))
+            base=$(basename "$f" .tar.gz)          # clang-<platform>
+            size=$(wc -c < "$f")
+            echo "| $base.tar.gz | $size | $((size / 1048576)) |" >> "$GITHUB_STEP_SUMMARY"
+            if [ "$size" -gt "$CLANG_ASSET_MAX_BYTES" ]; then
+              echo "::error::$base.tar.gz is $size bytes, over the slim cap of $CLANG_ASSET_MAX_BYTES"
+              FAILED=1
+            fi
+            case "$base" in *windows*) exe=.exe ;; *) exe= ;; esac
+            list=$(tar -tzf "$f")
+            for need in "$base/VERSION" "$base/bin/clang$exe" "$base/bin/lld$exe" "$base/bin/llvm-objdump$exe" \
+                        "$base/LICENSES/LLVM-LICENSE.TXT" "$base/LICENSES/Clang-LICENSE.TXT" "$base/LICENSES/LLD-LICENSE.TXT"; do
+              if ! echo "$list" | grep -qx "$need"; then
+                echo "::error::$base.tar.gz lacks $need"
+                FAILED=1
+              fi
+            done
+            if ! echo "$list" | grep -qE "^$base/lib/clang/[0-9]+/include/stdint\.h$"; then
+              echo "::error::$base.tar.gz lacks lib/clang/<ver>/include/stdint.h (the builtin headers)"
+              FAILED=1
+            fi
+            v=$(tar -xzOf "$f" "$base/VERSION" | tr -d '\r\n ')
+            if [ "$v" != "$LLVM_SHA" ]; then
+              echo "::error::$base.tar.gz VERSION is '$v' but this release pins LLVM $LLVM_SHA"
+              FAILED=1
+            fi
+          done
+          # One per native platform (build-llvm's matrix minus wasm).
+          if [ "$n" -ne 6 ]; then
+            echo "::error::expected 6 clang-<platform>.tar.gz assets, found $n"
+            FAILED=1
+          fi
+          for r in artifacts/**/clang-*.report.txt; do
+            {
+              echo
+              echo "<details><summary>$(basename "$r")</summary>"
+              echo
+              echo '```'
+              cat "$r"
+              echo '```'
+              echo "</details>"
+            } >> "$GITHUB_STEP_SUMMARY"
+          done
+
+          if [ "$FAILED" -ne 0 ]; then
+            echo "::error::asset verification failed — no release was created"
+            exit 1
+          fi
+          echo "All assets verified."
+
       - name: Create redistributables Release
         # softprops/action-gh-release@v1 uploads all release assets
-        # concurrently. Our release is ~9GB across 46 assets (seven
-        # LLVM artifacts alone are 1–1.8GB each). Parallel Node.js
+        # concurrently. Our release is ~9GB across 64 assets (seven
+        # LLVM artifacts alone are 1–1.9GB each; the six clang-* slim
+        # assets are small). Parallel Node.js
         # uploads of that payload reliably OOM the runner — the Actions
         # infra sends a "runner has received a shutdown signal" ~30s
         # into the upload burst. Switching to the gh CLI and uploading

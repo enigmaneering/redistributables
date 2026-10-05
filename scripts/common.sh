@@ -46,13 +46,21 @@ elif [[ "$OSTYPE" == "msys" || "$OSTYPE" == "win32" || "$OSTYPE" == "cygwin" ]];
     PLATFORM=$(echo "$PLATFORM" | sed 's/x86_64/amd64/g' | sed 's/aarch64/arm64/g')
 fi
 
-# Parallelism
-if [[ "$OSTYPE" == "darwin"* ]]; then
+# Parallelism. NCPU in the environment wins (a workflow can pin it); otherwise
+# every core on Linux and Windows — the hard-coded 2 dated from when GitHub's
+# hosted runners had two cores; they have had four since January 2024, and the
+# LLVM jobs (79–184 min at -j2) are the ones that notice. macOS stays at
+# half the cores: the macos-14 runner has 3 cores and 7 GB, and an LLVM link
+# wants a few GB each. (build-llvm.sh caps Windows link parallelism with
+# LLVM_PARALLEL_LINK_JOBS for the same reason.)
+if [ -n "$NCPU" ]; then
+    :
+elif [[ "$OSTYPE" == "darwin"* ]]; then
     NCPU=$(($(sysctl -n hw.ncpu) / 2))
 elif [[ "$OSTYPE" == "linux-gnu"* ]]; then
-    NCPU=2
+    NCPU=$(nproc 2>/dev/null || echo 2)
 else
-    NCPU=2
+    NCPU=$(nproc 2>/dev/null || echo "${NUMBER_OF_PROCESSORS:-2}")
 fi
 if [ "$NCPU" -lt 1 ]; then NCPU=1; fi
 

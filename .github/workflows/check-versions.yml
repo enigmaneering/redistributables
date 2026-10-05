@@ -39,18 +39,15 @@ jobs:
           echo "naga=$NAGA" >> $GITHUB_OUTPUT
           echo "Naga/wgpu: $NAGA"
 
-          LLVM=$(curl -s https://api.github.com/repos/llvm/llvm-project/releases/latest | grep '"tag_name"' | sed -E 's/.*"tag_name": "([^"]+)".*/\1/')
-          echo "llvm=$LLVM" >> $GITHUB_OUTPUT
-          echo "LLVM: $LLVM"
+          # LLVM and clspv are NOT tracked: the LLVM family builds from the
+          # hand-maintained CLSPV_SHA / LLVM_SHA pins in CURRENT_VERSIONS.txt
+          # (read by build-release.yml's determine-shas). Tracking the
+          # latest llvmorg release tag and clspv's main HEAD here described
+          # a tree nobody built and rewrote the file with it nightly.
 
           SPIRV_TRANSLATOR=$(curl -s https://api.github.com/repos/KhronosGroup/SPIRV-LLVM-Translator/releases/latest | grep '"tag_name"' | sed -E 's/.*"tag_name": "([^"]+)".*/\1/')
           echo "spirv_translator=$SPIRV_TRANSLATOR" >> $GITHUB_OUTPUT
           echo "SPIRV-LLVM-Translator: $SPIRV_TRANSLATOR"
-
-          # clspv has no releases — track latest commit on main
-          CLSPV=$(curl -s https://api.github.com/repos/google/clspv/commits/main | grep '"sha"' | head -1 | sed -E 's/.*"sha": "([^"]+)".*/\1/' | cut -c1-12)
-          echo "clspv=$CLSPV" >> $GITHUB_OUTPUT
-          echo "clspv: $CLSPV (main)"
 
           # FIDO2 stack — libfido2 + libcbor + hidapi + OpenSSL.  These
           # are bundled inside the libfido2-<platform>.tar.gz artifact
@@ -90,9 +87,7 @@ jobs:
             CURRENT_SPIRV_CROSS=$(grep "SPIRV_CROSS=" CURRENT_VERSIONS.txt | cut -d'=' -f2 || echo "")
             CURRENT_WGPU=$(grep "WGPU=" CURRENT_VERSIONS.txt | cut -d'=' -f2 || echo "")
             CURRENT_NAGA=$(grep "NAGA=" CURRENT_VERSIONS.txt | cut -d'=' -f2 || echo "")
-            CURRENT_LLVM=$(grep "LLVM=" CURRENT_VERSIONS.txt | cut -d'=' -f2 || echo "")
             CURRENT_SPIRV_TRANSLATOR=$(grep "SPIRV_TRANSLATOR=" CURRENT_VERSIONS.txt | cut -d'=' -f2 || echo "")
-            CURRENT_CLSPV=$(grep "CLSPV=" CURRENT_VERSIONS.txt | cut -d'=' -f2 || echo "")
             CURRENT_LIBFIDO2=$(grep "LIBFIDO2=" CURRENT_VERSIONS.txt | cut -d'=' -f2 || echo "")
             CURRENT_LIBCBOR=$(grep "LIBCBOR=" CURRENT_VERSIONS.txt | cut -d'=' -f2 || echo "")
             CURRENT_HIDAPI=$(grep "HIDAPI=" CURRENT_VERSIONS.txt | cut -d'=' -f2 || echo "")
@@ -103,9 +98,8 @@ jobs:
             echo "  SPIRV-Cross: $CURRENT_SPIRV_CROSS -> ${{ steps.versions.outputs.spirv_cross }}"
             echo "  wgpu-native: $CURRENT_WGPU -> ${{ steps.versions.outputs.wgpu }}"
             echo "  Naga: $CURRENT_NAGA -> ${{ steps.versions.outputs.naga }}"
-            echo "  LLVM: $CURRENT_LLVM -> ${{ steps.versions.outputs.llvm }}"
             echo "  SPIRV-LLVM-Translator: $CURRENT_SPIRV_TRANSLATOR -> ${{ steps.versions.outputs.spirv_translator }}"
-            echo "  clspv: $CURRENT_CLSPV -> ${{ steps.versions.outputs.clspv }}"
+            echo "  LLVM / clspv: pinned in CURRENT_VERSIONS.txt (not tracked)"
             echo "  libfido2: $CURRENT_LIBFIDO2 -> ${{ steps.versions.outputs.libfido2 }}"
             echo "  libcbor: $CURRENT_LIBCBOR -> ${{ steps.versions.outputs.libcbor }}"
             echo "  hidapi: $CURRENT_HIDAPI -> ${{ steps.versions.outputs.hidapi }}"
@@ -115,9 +109,7 @@ jobs:
                [ "$CURRENT_SPIRV_CROSS" != "${{ steps.versions.outputs.spirv_cross }}" ] || \
                [ "$CURRENT_WGPU" != "${{ steps.versions.outputs.wgpu }}" ] || \
                [ "$CURRENT_NAGA" != "${{ steps.versions.outputs.naga }}" ] || \
-               [ "$CURRENT_LLVM" != "${{ steps.versions.outputs.llvm }}" ] || \
                [ "$CURRENT_SPIRV_TRANSLATOR" != "${{ steps.versions.outputs.spirv_translator }}" ] || \
-               [ "$CURRENT_CLSPV" != "${{ steps.versions.outputs.clspv }}" ] || \
                [ "$CURRENT_LIBFIDO2" != "${{ steps.versions.outputs.libfido2 }}" ] || \
                [ "$CURRENT_LIBCBOR" != "${{ steps.versions.outputs.libcbor }}" ] || \
                [ "$CURRENT_HIDAPI" != "${{ steps.versions.outputs.hidapi }}" ] || \
@@ -133,18 +125,45 @@ jobs:
       - name: Update versions file
         if: steps.check.outputs.needs_release == 'true'
         run: |
+          # The LLVM-family pins are hand-maintained (see the file's own
+          # comment): carry them through the rewrite unchanged, and refuse
+          # to rewrite at all if they are missing — a rewrite that dropped
+          # them would make build-release's determine-shas fail on an empty
+          # CLSPV_SHA, silently, the next time anything was released.
+          CLSPV_SHA=$(sed -n 's/^CLSPV_SHA=//p' CURRENT_VERSIONS.txt | tr -d '\r ')
+          LLVM_SHA=$(sed -n 's/^LLVM_SHA=//p' CURRENT_VERSIONS.txt | tr -d '\r ')
+          LLVM_VERSION=$(sed -n 's/^LLVM_VERSION=//p' CURRENT_VERSIONS.txt | tr -d '\r ')
+          if [ -z "$CLSPV_SHA" ] || [ -z "$LLVM_SHA" ] || [ -z "$LLVM_VERSION" ]; then
+            echo "::error::CURRENT_VERSIONS.txt lacks CLSPV_SHA / LLVM_SHA / LLVM_VERSION — refusing to rewrite it"
+            exit 1
+          fi
           cat > CURRENT_VERSIONS.txt << EOF
+          # Tracked nightly by check-versions.yml, which rewrites this whole file when
+          # one of them moves (keep the KEY=VALUE lines; comments are carried through
+          # by the rewrite only where it reproduces them):
           GLSLANG=${{ steps.versions.outputs.glslang }}
           SPIRV_CROSS=${{ steps.versions.outputs.spirv_cross }}
           WGPU=${{ steps.versions.outputs.wgpu }}
           NAGA=${{ steps.versions.outputs.naga }}
-          LLVM=${{ steps.versions.outputs.llvm }}
           SPIRV_TRANSLATOR=${{ steps.versions.outputs.spirv_translator }}
-          CLSPV=${{ steps.versions.outputs.clspv }}
           LIBFIDO2=${{ steps.versions.outputs.libfido2 }}
           LIBCBOR=${{ steps.versions.outputs.libcbor }}
           HIDAPI=${{ steps.versions.outputs.hidapi }}
           OPENSSL=${{ steps.versions.outputs.openssl }}
+          # Hand-maintained pins — NOT tracked by the nightly check. The LLVM family
+          # (llvm-*, clang-*, clspv-*, spirv-llvm-translator-*) builds from clspv's
+          # pinned commit and from the LLVM commit that clspv's deps.json names AT that
+          # commit; build-release.yml's determine-shas job reads CLSPV_SHA here, resolves
+          # LLVM from deps.json and refuses to build if LLVM_SHA below disagrees, so a
+          # half-edited bump fails before anything compiles. CLSPV_SHA is held at the
+          # last commit whose libclc accepted our LLVM_DEFAULT_TARGET_TRIPLE=clspv--
+          # trick (upstream churned that CMake API after 2026-05-08). A bump is a
+          # deliberate edit of these three lines, a release, and — downstream — a full
+          # regeneration of enigmatic's consumers under the new clang (stdsyn's drift
+          # gate holds every committed kernel to this exact compiler).
+          CLSPV_SHA=$CLSPV_SHA
+          LLVM_SHA=$LLVM_SHA
+          LLVM_VERSION=$LLVM_VERSION
           UPDATED=$(date -u +"%Y-%m-%d %H:%M:%S UTC")
           EOF
 
@@ -160,9 +179,8 @@ jobs:
           - SPIRV-Cross: ${{ steps.versions.outputs.spirv_cross }}
           - wgpu-native: ${{ steps.versions.outputs.wgpu }}
           - Naga: ${{ steps.versions.outputs.naga }}
-          - LLVM: ${{ steps.versions.outputs.llvm }}
           - SPIRV-LLVM-Translator: ${{ steps.versions.outputs.spirv_translator }}
-          - clspv: ${{ steps.versions.outputs.clspv }}"
+          - LLVM / clspv: pinned (unchanged)"
           git push
 
       # Skip auto-dispatch when a build-failing issue is open.  The
@@ -214,9 +232,9 @@ jobs:
           echo "| SPIRV-Cross | ${{ steps.versions.outputs.spirv_cross }} |" >> $GITHUB_STEP_SUMMARY
           echo "| wgpu-native | ${{ steps.versions.outputs.wgpu }} |" >> $GITHUB_STEP_SUMMARY
           echo "| Naga | ${{ steps.versions.outputs.naga }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| LLVM | ${{ steps.versions.outputs.llvm }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| LLVM | pinned — see CURRENT_VERSIONS.txt (LLVM_SHA) |" >> $GITHUB_STEP_SUMMARY
           echo "| SPIRV-LLVM-Translator | ${{ steps.versions.outputs.spirv_translator }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| clspv | ${{ steps.versions.outputs.clspv }} (main) |" >> $GITHUB_STEP_SUMMARY
+          echo "| clspv | pinned — see CURRENT_VERSIONS.txt (CLSPV_SHA) |" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           if [ "${{ steps.check.outputs.needs_release }}" = "true" ]; then
             echo "🚀 **Release triggered** — new versions detected" >> $GITHUB_STEP_SUMMARY

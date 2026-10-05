@@ -16,7 +16,8 @@ across 7 targets (6 native + WebAssembly).
 | **spirv-to-dxil** | SPIR-V to DXIL (D3D12 backend; carve-out of Mesa) | [Mesa](https://gitlab.freedesktop.org/mesa/mesa) |
 | **Naga** | WGSL to/from SPIR-V (shared library via FFI) | [gfx-rs](https://github.com/gfx-rs/wgpu) |
 | **wgpu-native** | WebGPU runtime (Metal/Vulkan/D3D12/OpenGL) | [gfx-rs](https://github.com/gfx-rs/wgpu-native) |
-| **LLVM** | LLVM + Clang (NVPTX, AMDGPU, SPIRV experimental backends) | [LLVM](https://github.com/llvm/llvm-project) |
+| **LLVM** | LLVM + Clang + LLD dev kit (static archives, headers, tools, source): backends X86, ARM, AArch64, RISC-V, LoongArch, PowerPC, SystemZ, WebAssembly, NVPTX, AMDGPU, SPIRV | [LLVM](https://github.com/llvm/llvm-project) |
+| **clang** | the slim pinned toolchain [enigmatic](https://git.enigmaneering.org/enigmatic)'s `e fetch clang` installs: `bin/clang`, `bin/lld`, `bin/llvm-objdump`, the builtin headers — same build, same backends, one commit on every host | [LLVM](https://github.com/llvm/llvm-project) |
 | **clspv** | OpenCL C to Vulkan SPIR-V | [Google](https://github.com/google/clspv) |
 | **SPIRV-LLVM-Translator** | SPIR-V ↔ LLVM IR bridge | [Khronos](https://github.com/KhronosGroup/SPIRV-LLVM-Translator) |
 
@@ -25,13 +26,71 @@ dependencies, not the full library.
 
 ## Platforms
 
-All tools except `spirv-to-dxil` are provided for:
+All tools except `spirv-to-dxil` and `clang` are provided for:
 - macOS ARM64 / x86_64
 - Linux x86_64 / ARM64
 - Windows x86_64 / ARM64
 - WebAssembly
 
 **NOTE:** `spirv-to-dxil` is only used on Windows or WSL targets, as that's the only places where D3D12 lives.
+
+**NOTE:** `clang` (the slim toolchain) is built for the six native platforms and not for WebAssembly: it is a
+compiler that runs on a host, and the WebAssembly LLVM build is a library for running inside one.
+
+## The slim clang (`clang-<platform>.tar.gz`)
+
+One LLVM, pinned, on every host — so a kernel regenerated on a laptop and in CI compiles byte for byte the
+same, and a consumer's drift gate (`go generate ./... && git diff --exit-code`) can be a real one. `e fetch
+clang` downloads this asset into `<root>/external/clang`; `e` then finds it as the second rung of its
+toolchain ladder (after `E_CLANG`, before anything on the host) and records `redistributables vX.Y.Z` beside
+the clang version in `e.json` and in every generated header.
+
+What is inside, and why nothing more:
+
+```
+clang-<platform>/
+  bin/clang[.exe]             the real driver binary (on unix the clang-<major> file itself, not a link)
+  bin/clang++                 unix only, symlink → clang
+  bin/lld[.exe]               the real LLD driver; every flavor lives in it
+  bin/ld.lld, bin/wasm-ld     unix only, symlinks → lld (lld takes its flavor from argv[0];
+                              clang's -fuse-ld=lld looks for exactly these names beside itself)
+  bin/llvm-objdump[.exe]      e's second decoder
+  lib/clang/<major>/include/  the builtin headers (<stdint.h>, <stddef.h>, …) a -ffreestanding
+                              -nostdlib compile still includes; found via realpath(argv[0])/../lib
+  VERSION                     the LLVM commit (the same string determine-shas pinned)
+  LICENSES/                   LLVM-LICENSE.TXT, Clang-LICENSE.TXT, LLD-LICENSE.TXT
+```
+
+- **Windows ships no links at all**: one `clang.exe`, one `lld.exe`, one `llvm-objdump.exe`. MSYS2 degrades
+  `ln -s` to a copy, a copy of a ~150 MB static binary per alias is not worth shipping, and `e` links
+  WebAssembly there as `lld.exe -flavor wasm`. The archive is `.tar.gz` on all six platforms (e's fetch
+  has no xz and no zip need).
+- **Statically linked**: the tools depend on the OS alone — no MSYS2 DLLs (`libstdc++-6`, `libwinpthread-1`,
+  `libc++`), no Homebrew dylibs, no distro `libstdc++` of a particular release. Linux links glibc
+  dynamically (the only sane way); macOS links `/usr/lib` only, with a deployment floor of macOS 12 (Go
+  1.26's own floor). `scripts/package-clang.sh` asserts the dependency list of every shipped tool on every
+  build and records the glibc floor in `clang-<platform>.report.txt`.
+- **Stripped**, with the build tree's own `llvm-strip`; ad-hoc re-signed on macOS.
+- **Not inside**: `clang-cl`, `clang-cpp`, `lld-link`, `ld64.lld`, `llvm-mc`, `llvm-readobj`, compiler-rt.
+  `e` calls `clang`, `wasm-ld`/`lld` and `llvm-objdump` and nothing else, and the stdsyn dialect is
+  freestanding (`-ffreestanding -nostdlib -fno-builtin`; an undefined symbol is a dialect error), so no
+  runtime library is ever linked. Nothing from this asset links into any consumer binary — it is a
+  subprocess `e` drives; the license texts travel with it under `LICENSES/`.
+- `clang --version` names the commit by itself — `clang version 23.0.0git (https://github.com/llvm/llvm-project.git <sha>)`
+  — because the build checks LLVM out with git and keeps `LLVM_APPEND_VC_REV=ON`.
+
+### The pin
+
+`CURRENT_VERSIONS.txt` is the one place the LLVM family is pinned: `CLSPV_SHA` (clspv's commit) and
+`LLVM_SHA` (the LLVM commit clspv's `deps.json` names at that commit — `build-release.yml` resolves it from
+`deps.json` and refuses to build if the two lines disagree). The nightly `check-versions.yml` tracks the
+other tools and carries these pins through untouched. A bump is a deliberate edit of those lines followed
+by a release; `e` pins the release it fetches, and every consumer regenerates under the new clang before its
+drift gate goes green again.
+
+`scripts/package-clang.sh` can also be run by hand against an existing install tree
+(`LLVM_INSTALL_DIR=… LLVM_SOURCE_DIR=… PLATFORM=… LLVM_TAG=… OUTPUT_DIR=…`); `PACKAGE_CLANG_STRICT=0`
+turns its verifications into warnings for local experiments.
 
 ## License
 
@@ -47,3 +106,11 @@ MSVC .lib files. Consumers need a UCRT-family toolchain (MSYS2, MinGW-w64 UCRT, 
 plain MSVC can't link them directly due to the CRT coupling and import-lib format differences.
 
 There are so many reasons for this, mostly from interoperability perspectives.
+
+The executables in the Windows LLVM builds (the dev kit's tools and the whole slim `clang` asset) are the
+exception to "needs a toolchain": they are linked `-static`, import Windows system DLLs only, and run on a
+machine with no MSYS2 at all. The dev kit's `bin/` on Windows keeps one `clang.exe` and one `lld.exe`;
+the aliases cmake would have installed as full copies (`clang++.exe`, `clang-cl.exe`, `clang-cpp.exe`,
+`clang-dxc.exe`, `ld.lld.exe`, `ld64.lld.exe`, `lld-link.exe`, `wasm-ld.exe`) are pruned to keep the
+artifact under GitHub's 2 GiB asset cap — `clang --driver-mode=g++` and `lld -flavor <x>` are the same
+programs.

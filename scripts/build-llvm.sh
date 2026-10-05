@@ -1,9 +1,12 @@
 #!/bin/bash
 set -e
 
-# Build LLVM + Clang for libmental.
-# Produces shared libraries (native) or static libraries (WASM).
-# All other downstream tools build against this.
+# Build LLVM + Clang (+ LLD on the native platforms) for libmental.
+# Produces the llvm-<platform> dev kit (static archives, headers, tools and the
+# full source tree) that clspv and spirv-llvm-translator build against, and —
+# on the six native platforms — the slim clang-<platform> asset that
+# enigmatic's `e fetch clang` installs (scripts/package-clang.sh, from the
+# SAME build tree, so e's compiler on every host is this release's compiler).
 
 . "$(dirname "$0")/common.sh"
 
@@ -135,10 +138,74 @@ if [ "$IS_WASM" -eq 1 ]; then
     CMAKE_CMD="emcmake $CMAKE"
     MAKE_CMD="emmake $CMAKE"
     LLVM_TARGETS="X86"
+    LLVM_PROJECTS="clang"
+    NATIVE_FLAGS=""
 else
     CMAKE_CMD="$CMAKE"
     MAKE_CMD="$CMAKE"
-    LLVM_TARGETS="Native;NVPTX;AMDGPU"
+    # Every backend an enigmatic target names (enigmatic/internal/targets/
+    # targets.go: x86-64, x86, aarch64, arm, riscv64, loongarch64, ppc64,
+    # ppc64le, systemz, wasm32, wasm64, nvptx64, amdgcn, spirv64) plus NVPTX
+    # and AMDGPU for clspv. Spelled out rather than "Native;…" so the dev kit
+    # and the slim clang carry the SAME backend list on all six platforms —
+    # e records the backends in e.json, and a drift gate that compares e.json
+    # byte for byte across hosts needs one list, not a per-host one. SPIRV is
+    # a core target at the pin (llvm/CMakeLists.txt LLVM_ALL_TARGETS) and is
+    # still passed through the experimental list below, which is what every
+    # release since the pin has done; the two are merged and de-duplicated.
+    LLVM_TARGETS="X86;ARM;AArch64;RISCV;LoongArch;PowerPC;SystemZ;WebAssembly;NVPTX;AMDGPU"
+    # lld joins the native build: the slim asset ships bin/lld (wasm-ld for e's
+    # wasm targets, every other flavor for free), and the dev kit gains the
+    # liblld* archives and lld headers. The wasm phases stay clang-only.
+    LLVM_PROJECTS="clang;lld"
+    # Determinism and self-containment of the shipped tools:
+    #   LLVM_APPEND_VC_REV=ON  the commit goes into `clang --version`, which is
+    #                          how e.json and every generated header name the
+    #                          pin by themselves (explicit; it is the default)
+    #   LLVM_FORCE_VC_REPOSITORY / LLVM_FORCE_VC_REVISION  the repository and
+    #                          commit spelled out, so the version line is
+    #                          "clang version 23.0.0git (https://github.com/llvm/llvm-project.git <sha>)"
+    #                          on every builder. Without them LLVM asks git
+    #                          (`git remote get-url origin`, VersionFromVCS.cmake),
+    #                          which reports the URL as the builder's git config
+    #                          rewrites it - a url.<base>.insteadOf on the M6a
+    #                          build host turned it into ssh://git@github.com/… -
+    #                          and that line is the identity e records in e.json
+    #                          and every generated header, which a blocking drift
+    #                          gate compares byte for byte. GenerateVersionFromVCS
+    #                          .cmake honours the pair for LLVM, Clang and LLD
+    #                          alike, and it works for a tarball checkout too.
+    #   LIBXML2/LIBEDIT/LIBPFM/CURL/HTTPLIB=OFF  nothing optional is linked in,
+    #                          so the tools depend on the OS alone and no
+    #                          non-LLVM license rides along (zlib/zstd are
+    #                          already off); the dev kit's archives lose
+    #                          nothing a consumer links today
+    NATIVE_FLAGS="-DLLVM_APPEND_VC_REV=ON -DLLVM_FORCE_VC_REPOSITORY=https://github.com/llvm/llvm-project.git -DLLVM_FORCE_VC_REVISION=$LLVM_TAG -DLLVM_ENABLE_LIBXML2=OFF -DLLVM_ENABLE_LIBEDIT=OFF -DLLVM_ENABLE_LIBPFM=OFF -DLLVM_ENABLE_CURL=OFF -DLLVM_ENABLE_HTTPLIB=OFF"
+    if [[ "$OSTYPE" == "darwin"* ]]; then
+        # One deployment floor for every darwin build instead of the runner's
+        # OS version: 12.0 is Go 1.26's own macOS floor, so a host that can run
+        # e can run this clang. Lowering the floor is safe for the dev kit —
+        # ld64 accepts archives built for an older macOS than the dylib that
+        # links them, never the reverse.
+        NATIVE_FLAGS="$NATIVE_FLAGS -DCMAKE_OSX_DEPLOYMENT_TARGET=${MACOS_DEPLOYMENT_TARGET:-12.0}"
+    elif [[ "$OSTYPE" == "linux-gnu"* ]]; then
+        # libstdc++ and libgcc static (HandleLLVMStdlib.cmake adds
+        # -static-libstdc++; -static-libgcc is ours), glibc dynamic: a fully
+        # static glibc is both discouraged and LGPL-encumbered. The tools
+        # depend on libc/libm/libdl/libpthread/librt and the loader only —
+        # package-clang.sh asserts the list and records the glibc floor.
+        NATIVE_FLAGS="$NATIVE_FLAGS -DLLVM_STATIC_LINK_CXX_STDLIB=ON -DCMAKE_EXE_LINKER_FLAGS=-static-libgcc"
+    elif [[ "$OSTYPE" == "msys" || "$OSTYPE" == "win32" || "$OSTYPE" == "cygwin" ]]; then
+        # MSYS2 executables import libstdc++-6/libgcc_s_seh-1/libwinpthread-1
+        # (UCRT64) or libc++/libunwind (CLANGARM64) by default — absent on a
+        # consumer's machine, which fails to start the tool with 0xC0000135
+        # and no message. -static folds them in; the import table then names
+        # Windows system DLLs only (package-clang.sh asserts it).
+        # LLVM_PARALLEL_LINK_JOBS caps simultaneous links (Ninja only): each
+        # link of a static all-backends tool wants a few GB and the runner has
+        # 16 GB, while compiles use every core (common.sh NCPU).
+        NATIVE_FLAGS="$NATIVE_FLAGS -DLLVM_STATIC_LINK_CXX_STDLIB=ON -DCMAKE_EXE_LINKER_FLAGS=-static -DLLVM_PARALLEL_LINK_JOBS=2"
+    fi
 fi
 
 $CMAKE_CMD ../llvm \
@@ -147,7 +214,8 @@ $CMAKE_CMD ../llvm \
     -DCMAKE_BUILD_TYPE=Release \
     -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
     $WASM_FLAGS \
-    -DLLVM_ENABLE_PROJECTS="clang" \
+    $NATIVE_FLAGS \
+    -DLLVM_ENABLE_PROJECTS="$LLVM_PROJECTS" \
     -DLLVM_TARGETS_TO_BUILD="$LLVM_TARGETS" \
     -DLLVM_EXPERIMENTAL_TARGETS_TO_BUILD="SPIRV" \
     -DLLVM_INCLUDE_TESTS=OFF \
@@ -244,6 +312,45 @@ else
             install_name_tool -id "@rpath/$(basename "$d")" "$d" 2>/dev/null || true
         done
     fi
+
+    # The slim clang asset — clang-<platform>.tar.gz — packaged from this very
+    # install tree before anything below touches it. A failure here fails the
+    # job: the asset is a release deliverable, and a job that fails caches
+    # nothing, so a half-made asset never lands in the cache either.
+    echo "Packaging the slim clang asset (scripts/package-clang.sh)..."
+    LLVM_INSTALL_DIR="$PACKAGE_DIR" \
+    LLVM_SOURCE_DIR="$BUILD_DIR/llvm-project" \
+    PLATFORM="$PLATFORM" \
+    LLVM_TAG="$LLVM_TAG" \
+    OUTPUT_DIR="$OUTPUT_DIR" \
+    bash "$SCRIPT_DIR/package-clang.sh"
+
+    # Windows dev kit: cmake --install copies instead of symlinking there
+    # (LLVM_USE_SYMLINKS defaults to CMAKE_HOST_UNIX, and LLVMInstallSymlink
+    # .cmake then runs `cmake -E copy`), so clang's four driver aliases and
+    # lld's four flavor names are each a full copy of a ~230 MB static
+    # binary. v0.0.82's llvm-windows-amd64.tar.gz was already 91% of GitHub's
+    # 2 GiB asset cap before lld and eight more backends; the copies are
+    # pure redundancy, so drop every alias that is byte-identical to the
+    # real binary. clang.exe and lld.exe stay (they ARE the real binaries on
+    # Windows — no clang-<major>.exe exists there); `clang --driver-mode=g++`
+    # and `lld -flavor <x>` reach every removed name's behaviour.
+    if [[ "$OSTYPE" == "msys" || "$OSTYPE" == "win32" || "$OSTYPE" == "cygwin" ]]; then
+        prune_alias() { # <alias.exe> <real.exe>
+            [ -f "$1" ] && [ -f "$2" ] || return 0
+            if [ "$(wc -c < "$1")" = "$(wc -c < "$2")" ] && \
+               [ "$(sha256sum "$1" | awk '{print $1}')" = "$(sha256sum "$2" | awk '{print $1}')" ]; then
+                echo "  dev kit: removing $(basename "$1") (a copy of $(basename "$2"))"
+                rm -f "$1"
+            fi
+        }
+        for a in clang++ clang-cl clang-cpp clang-dxc; do
+            prune_alias "$PACKAGE_DIR/bin/$a.exe" "$PACKAGE_DIR/bin/clang.exe"
+        done
+        for a in ld.lld ld64.lld lld-link wasm-ld; do
+            prune_alias "$PACKAGE_DIR/bin/$a.exe" "$PACKAGE_DIR/bin/lld.exe"
+        done
+    fi
 fi
 
 # Bundle the FULL llvm-project source tree into the artifact so downstream
@@ -271,10 +378,16 @@ tar -cf - \
 # release tag (fallback). Either form is a valid upstream identifier.
 echo "$LLVM_TAG" > "$PACKAGE_DIR/VERSION"
 
-# License
+# Licenses — hard copies, no `|| true`: clang is always built, and the native
+# dev kit now carries lld's archives, so its license text travels with them.
+# The three texts differ (each names its own legacy UIUC copyright line), and
+# the verify-licenses job hashes all three source files.
 mkdir -p "$PACKAGE_DIR/LICENSES"
 cp ../llvm/LICENSE.TXT "$PACKAGE_DIR/LICENSES/LLVM-LICENSE.TXT"
-cp ../clang/LICENSE.TXT "$PACKAGE_DIR/LICENSES/Clang-LICENSE.TXT" 2>/dev/null || true
+cp ../clang/LICENSE.TXT "$PACKAGE_DIR/LICENSES/Clang-LICENSE.TXT"
+if [ "$IS_WASM" -eq 0 ]; then
+    cp ../lld/LICENSE.TXT "$PACKAGE_DIR/LICENSES/LLD-LICENSE.TXT"
+fi
 
 cd "$OUTPUT_DIR"
 tar -czf "llvm-${PLATFORM}.tar.gz" "llvm-$PLATFORM"

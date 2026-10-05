@@ -1,12 +1,27 @@
+# Tracked nightly by check-versions.yml, which rewrites this whole file when
+# one of them moves (keep the KEY=VALUE lines; comments are carried through
+# by the rewrite only where it reproduces them):
 GLSLANG=16.6.0
 SPIRV_CROSS=vulkan-sdk-1.4.363.0
 WGPU=v29.0.1.1
 NAGA=v30.0.1
-LLVM=llvmorg-23.1.2
 SPIRV_TRANSLATOR=v23.1.2
-CLSPV=8cffac9f9779
 LIBFIDO2=
 LIBCBOR=0.14.0
 HIDAPI=hidapi-0.15.0
 OPENSSL=3.6.5
+# Hand-maintained pins — NOT tracked by the nightly check. The LLVM family
+# (llvm-*, clang-*, clspv-*, spirv-llvm-translator-*) builds from clspv's
+# pinned commit and from the LLVM commit that clspv's deps.json names AT that
+# commit; build-release.yml's determine-shas job reads CLSPV_SHA here, resolves
+# LLVM from deps.json and refuses to build if LLVM_SHA below disagrees, so a
+# half-edited bump fails before anything compiles. CLSPV_SHA is held at the
+# last commit whose libclc accepted our LLVM_DEFAULT_TARGET_TRIPLE=clspv--
+# trick (upstream churned that CMake API after 2026-05-08). A bump is a
+# deliberate edit of these three lines, a release, and — downstream — a full
+# regeneration of enigmatic's consumers under the new clang (stdsyn's drift
+# gate holds every committed kernel to this exact compiler).
+CLSPV_SHA=f781210fc173488f3136d7013e9a04d6c110eb07
+LLVM_SHA=81d3c19137011a8f46495c8a3a24cf8a8c0a20df
+LLVM_VERSION=23.0.0git
 UPDATED=2026-10-01 07:54:51 UTC
