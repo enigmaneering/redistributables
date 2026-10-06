@@ -158,12 +158,33 @@ jobs:
           mkdir -p /tmp/license-check && cd /tmp/license-check
 
           echo "Cloning upstream repositories..."
-          git clone --depth 1 https://github.com/KhronosGroup/glslang.git
-          git clone --depth 1 https://github.com/KhronosGroup/SPIRV-Tools.git spirv-tools
-          git clone --depth 1 https://github.com/KhronosGroup/SPIRV-Headers.git spirv-headers
-          git clone --depth 1 https://github.com/KhronosGroup/SPIRV-Cross.git spirv-cross
-          git clone --depth 1 https://github.com/gfx-rs/wgpu-native.git wgpu-native
-          git clone --depth 1 https://github.com/gfx-rs/wgpu.git wgpu
+          # The licenses verified are the licenses that SHIP: every clone is
+          # at the version the build uses, never a default branch. glslang,
+          # SPIRV-Cross, wgpu-native and wgpu (Naga) are the tags
+          # CURRENT_VERSIONS.txt names; SPIRV-Tools and SPIRV-Headers are the
+          # commits glslang's known_good.json pins for that glslang, exactly
+          # as build-glslang.sh checks them out. (v0.0.83's build failed here
+          # on wgpu's trunk, whose LICENSE.MIT had moved to a 2026 copyright
+          # line while the v30.0.1 that builds still carried 2025.)
+          V="$GITHUB_WORKSPACE/CURRENT_VERSIONS.txt"
+          pin() { sed -n "s/^$1=//p" "$V" | tr -d '\r '; }
+          GLSLANG_VERSION=$(pin GLSLANG); SPIRV_CROSS_VERSION=$(pin SPIRV_CROSS)
+          WGPU_VERSION=$(pin WGPU); NAGA_VERSION=$(pin NAGA)
+          for v in GLSLANG_VERSION SPIRV_CROSS_VERSION WGPU_VERSION NAGA_VERSION; do
+            if [ -z "${!v}" ]; then echo "::error::CURRENT_VERSIONS.txt has no line for ${v%_VERSION}"; exit 1; fi
+          done
+          echo "glslang $GLSLANG_VERSION · SPIRV-Cross $SPIRV_CROSS_VERSION · wgpu-native $WGPU_VERSION · wgpu (Naga) $NAGA_VERSION"
+          git clone --depth 1 --branch "$GLSLANG_VERSION" https://github.com/KhronosGroup/glslang.git
+          SPIRV_TOOLS_SHA=$(python3 -c "import json; d=json.load(open('glslang/known_good.json')); print(next(c['commit'] for c in d['commits'] if c['name']=='spirv-tools'))")
+          SPIRV_HEADERS_SHA=$(python3 -c "import json; d=json.load(open('glslang/known_good.json')); print(next(c['commit'] for c in d['commits'] if c['name']=='spirv-tools/external/spirv-headers'))")
+          echo "SPIRV-Tools $SPIRV_TOOLS_SHA · SPIRV-Headers $SPIRV_HEADERS_SHA (glslang's known_good.json)"
+          git clone https://github.com/KhronosGroup/SPIRV-Tools.git spirv-tools
+          (cd spirv-tools && git checkout -q "$SPIRV_TOOLS_SHA")
+          git clone https://github.com/KhronosGroup/SPIRV-Headers.git spirv-headers
+          (cd spirv-headers && git checkout -q "$SPIRV_HEADERS_SHA")
+          git clone --depth 1 --branch "$SPIRV_CROSS_VERSION" https://github.com/KhronosGroup/SPIRV-Cross.git spirv-cross
+          git clone --depth 1 --branch "$WGPU_VERSION" https://github.com/gfx-rs/wgpu-native.git wgpu-native
+          git clone --depth 1 --branch "$NAGA_VERSION" https://github.com/gfx-rs/wgpu.git wgpu
           # FIDO2 stack: pin to the exact release tags build-libfido2.sh
           # consumes so a licence amendment in a future tag doesn't
           # slip past the check.
