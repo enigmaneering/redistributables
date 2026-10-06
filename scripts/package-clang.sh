@@ -424,6 +424,10 @@ allowed_dep() {
                  esac ;;
         windows) case "$d" in
                      kernel32.dll|user32.dll|advapi32.dll|shell32.dll|ole32.dll|oleaut32.dll|ws2_32.dll|version.dll|psapi.dll|dbghelp.dll|bcrypt.dll|ntdll.dll|msvcrt.dll|ucrtbase.dll|rpcrt4.dll|crypt32.dll|shlwapi.dll) return 0 ;;
+                     # winhttp.dll ships with every Windows since XP (System32); LLVM
+                     # main's llvm/lib/HTTP has a WinHTTP backend for debuginfod, which
+                     # llvm-objdump links - the v0.0.84 build failed here on it.
+                     winhttp.dll) return 0 ;;
                      api-ms-win-*.dll|ext-ms-win-*.dll) return 0 ;;
                  esac ;;
     esac

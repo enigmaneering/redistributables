@@ -946,7 +946,12 @@ jobs:
     needs: [verify-licenses, determine-shas]
     name: "Build LLVM (${{ matrix.platform }})"
     strategy:
-      fail-fast: true
+      # Not fail-fast: each leg is an hour or more of cold LLVM build whose
+      # cache is only saved when the job succeeds, and the checks that can
+      # fail a leg (package-clang.sh's verifications) run at its END. v0.0.84
+      # lost six finished builds to one leg's packaging check; let the others
+      # complete and cache, and let create-release refuse the short set.
+      fail-fast: false
       matrix:
         include:
           - runner: macos-14
