@@ -12,6 +12,26 @@ on:
         default: "Alpha and Omega"
         type: string
 
+env:
+  # The slim clang asset's size cap in bytes: 160 MiB. package-clang.sh's
+  # own default is 104857600 (100 MiB, the gameplan's figure); this is the
+  # measured reality - v0.0.85's linux-amd64 asset weighed 125,933,623 B
+  # (120.1 MiB) and linux-arm64's 122,270,824 B (116.6 MiB), because an ELF
+  # with a static libstdc++ and no section GC is ~40% bigger than the
+  # Mach-O and PE builds (darwin-arm64 87,057,453 B = 83.0 MiB,
+  # windows-arm64 87,707,818 B = 83.6 MiB). One literal, read by every
+  # place that applies the cap: build-llvm's "Build LLVM" steps (through
+  # build-llvm.sh → package-clang.sh), its cache-hit "Package slim clang
+  # from the cached dev kit" steps, and create-release's verification -
+  # so the build-time and release-time checks can never disagree (one
+  # inherited env rather than a literal repeated at each site, which
+  # could drift; create-release refuses to run without it). It is
+  # set here and not in the script because build-llvm's cache key hashes
+  # scripts/build-llvm.sh, common.sh and package-clang.sh: a byte changed
+  # in any of them throws away every hour-long dev kit the key still
+  # matches.
+  CLANG_ASSET_MAX_BYTES: "167772160"
+
 jobs:
   announce:
     name: Trigger Info
@@ -986,9 +1006,11 @@ jobs:
           # Both deliverables of one build: the dev kit and, on the six
           # native platforms, the slim clang asset plus its report. The
           # clang glob matches nothing on wasm, which actions/cache
-          # tolerates as long as one path matches. Without the second line
-          # a cache hit would skip the build and the clang upload below
-          # would find nothing.
+          # tolerates as long as one path matches. A cache hit skips the
+          # build; the "Package slim clang from the cached dev kit" steps
+          # below then make the asset again from the restored dev kit, so
+          # the clang upload never depends on what a cache happens to hold
+          # (v0.0.85's caches hold both; an older or hand-made one may not).
           path: |
             ${{ runner.temp }}/output/llvm-${{ matrix.platform }}.*
             ${{ runner.temp }}/output/clang-${{ matrix.platform }}.*
@@ -1039,6 +1061,10 @@ jobs:
         with:
           version: "5.0.1"
 
+      # Both build steps package the slim clang at their end (build-llvm.sh
+      # → package-clang.sh) under the cap the workflow-level env sets,
+      # CLANG_ASSET_MAX_BYTES (160 MiB; the script's own default is the
+      # gameplan's 100 MiB, which v0.0.85's Linux assets outgrew).
       - name: Build LLVM (Unix)
         if: steps.cache-llvm.outputs.cache-hit != 'true' && runner.os != 'Windows'
         shell: bash
@@ -1061,6 +1087,58 @@ jobs:
           LLVM_SHA="${{ needs.determine-shas.outputs.llvm_sha }}" \
           MENTAL_PLATFORM="${{ matrix.platform }}" bash scripts/build-llvm.sh
 
+      # A cache hit skipped the build, and the cache holds the dev kit
+      # (llvm-<platform>.tar.gz) - whether it also holds a slim asset is
+      # the cache's business, not the release's. The six native legs make
+      # clang-<platform>.tar.gz again from the restored dev kit, with the
+      # same package-clang.sh over the same bytes (the kit's bin/ tools and
+      # builtin headers, its VERSION, the license texts of its bundled src/
+      # tree; see scripts/package-clang-from-devkit.sh), so the upload
+      # below always has an asset and the cap is applied by this run.
+      # Inputs are the step's env; every missing piece fails the step.
+      - name: Set up MSYS2 for packaging (Windows, cache hit)
+        # The build's MSYS2 (Install MinGW above) is skipped on a cache hit,
+        # and `shell: msys2 {0}` needs the action to have run. The packaging
+        # needs only MSYS2's base tools from the host - bash, tar, gzip,
+        # coreutils, findutils, gawk, grep, sed - named here so `pacman -S
+        # --needed` proves them present at no cost; llvm-strip and
+        # llvm-readobj come out of the dev kit itself. Same msystem as the
+        # build, so uname and the PATH prefix agree with the cold path.
+        if: steps.cache-llvm.outputs.cache-hit == 'true' && runner.os == 'Windows'
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: ${{ matrix.msys_subsystem }}
+          install: >-
+            tar
+            gzip
+            coreutils
+            findutils
+            gawk
+            grep
+            sed
+
+      - name: Package slim clang from the cached dev kit (Unix)
+        if: steps.cache-llvm.outputs.cache-hit == 'true' && matrix.platform != 'wasm' && runner.os != 'Windows'
+        shell: bash
+        env:
+          PLATFORM: ${{ matrix.platform }}
+          OUTPUT_DIR: ${{ runner.temp }}/output
+          WORK_DIR: ${{ runner.temp }}/devkit
+          LLVM_SHA: ${{ needs.determine-shas.outputs.llvm_sha }}
+          # CLANG_ASSET_MAX_BYTES: the workflow-level env, same as the build.
+        run: bash scripts/package-clang-from-devkit.sh
+
+      - name: Package slim clang from the cached dev kit (Windows)
+        if: steps.cache-llvm.outputs.cache-hit == 'true' && runner.os == 'Windows'
+        shell: msys2 {0}
+        env:
+          PLATFORM: ${{ matrix.platform }}
+          OUTPUT_DIR: ${{ runner.temp }}/output
+          WORK_DIR: ${{ runner.temp }}/devkit
+          LLVM_SHA: ${{ needs.determine-shas.outputs.llvm_sha }}
+          # CLANG_ASSET_MAX_BYTES: the workflow-level env, same as the build.
+        run: bash scripts/package-clang-from-devkit.sh
+
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
@@ -1069,9 +1147,10 @@ jobs:
 
       # The slim clang asset — clang-<platform>.tar.gz — comes out of the
       # same build (scripts/package-clang.sh, run by build-llvm.sh on the
-      # native platforms) and its report .txt rides along for the release
-      # job's summary. A missing tarball is an error, never a silent skip:
-      # a release without all six is a release e cannot pin.
+      # native platforms, or by the cache-hit steps above over the cached
+      # dev kit) and its report .txt rides along for the release job's
+      # summary. A missing tarball is an error, never a silent skip: a
+      # release without all six is a release e cannot pin.
       - name: Upload slim clang
         if: matrix.platform != 'wasm'
         uses: actions/upload-artifact@v4
@@ -1620,12 +1699,16 @@ jobs:
       - name: Verify assets before the release exists
         env:
           LLVM_SHA: ${{ needs.determine-shas.outputs.llvm_sha }}
-          # The slim clang's own cap (the gameplan's 100 MiB; the per-platform
-          # report in the step summary says what each one really weighs).
-          CLANG_ASSET_MAX_BYTES: "104857600"
+          # CLANG_ASSET_MAX_BYTES, the slim clang's cap, is the workflow-level
+          # env - the one literal the build legs packaged under, so this
+          # check cannot disagree with theirs; the per-platform report in
+          # the step summary says what each asset really weighs.
         run: |
           set -eo pipefail
           shopt -s globstar nullglob
+          # An unset cap would make the -gt below a bash error inside an if,
+          # i.e. a check that silently passes; refuse to run without it.
+          : "${CLANG_ASSET_MAX_BYTES:?is unset - the workflow-level env at the top of this file sets it}"
           GITHUB_ASSET_CAP=2147483648   # GitHub's per-asset limit: 2 GiB
           FAILED=0
 
