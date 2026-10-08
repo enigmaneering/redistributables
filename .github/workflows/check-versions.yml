@@ -132,9 +132,10 @@ jobs:
           # CLSPV_SHA, silently, the next time anything was released.
           CLSPV_SHA=$(sed -n 's/^CLSPV_SHA=//p' CURRENT_VERSIONS.txt | tr -d '\r ')
           LLVM_SHA=$(sed -n 's/^LLVM_SHA=//p' CURRENT_VERSIONS.txt | tr -d '\r ')
+          TRANSLATOR_SHA=$(sed -n 's/^TRANSLATOR_SHA=//p' CURRENT_VERSIONS.txt | tr -d '\r ')
           LLVM_VERSION=$(sed -n 's/^LLVM_VERSION=//p' CURRENT_VERSIONS.txt | tr -d '\r ')
-          if [ -z "$CLSPV_SHA" ] || [ -z "$LLVM_SHA" ] || [ -z "$LLVM_VERSION" ]; then
-            echo "::error::CURRENT_VERSIONS.txt lacks CLSPV_SHA / LLVM_SHA / LLVM_VERSION — refusing to rewrite it"
+          if [ -z "$CLSPV_SHA" ] || [ -z "$LLVM_SHA" ] || [ -z "$LLVM_VERSION" ] || [ -z "$TRANSLATOR_SHA" ]; then
+            echo "::error::CURRENT_VERSIONS.txt lacks CLSPV_SHA / LLVM_SHA / LLVM_VERSION / TRANSLATOR_SHA — refusing to rewrite it"
             exit 1
           fi
           cat > CURRENT_VERSIONS.txt << EOF
@@ -163,6 +164,9 @@ jobs:
           # gate holds every committed kernel to this exact compiler).
           CLSPV_SHA=$CLSPV_SHA
           LLVM_SHA=$LLVM_SHA
+          # TRANSLATOR_SHA: SPIRV-LLVM-Translator's main commit of the same day as LLVM_SHA
+          # (it tracks LLVM main in lockstep); moves with LLVM_SHA, never on its own.
+          TRANSLATOR_SHA=$TRANSLATOR_SHA
           LLVM_VERSION=$LLVM_VERSION
           UPDATED=$(date -u +"%Y-%m-%d %H:%M:%S UTC")
           EOF

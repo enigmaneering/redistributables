@@ -23,5 +23,10 @@ OPENSSL=3.6.5
 # gate holds every committed kernel to this exact compiler).
 CLSPV_SHA=f781210fc173488f3136d7013e9a04d6c110eb07
 LLVM_SHA=81d3c19137011a8f46495c8a3a24cf8a8c0a20df
+# TRANSLATOR_SHA: SPIRV-LLVM-Translator's main commit of the same day as LLVM_SHA
+# (the translator tracks LLVM main in lockstep, so its BASE_LLVM_VERSION is the
+# pinned LLVM's); it moves with LLVM_SHA, never on its own. v0.0.86 died when the
+# floating main HEAD demanded LLVM 24.0.0 against the 23.0.0git pin.
+TRANSLATOR_SHA=8324c559351d1dad6c6b75f9854a3a392b9fd2ca
 LLVM_VERSION=23.0.0git
 UPDATED=2026-10-01 07:54:51 UTC
