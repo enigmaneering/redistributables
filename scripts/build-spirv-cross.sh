@@ -11,7 +11,7 @@ OUTPUT_DIR="${OUTPUT_DIR:-$SCRIPT_DIR/../output}"
 # Query GitHub for latest vulkan-sdk tag if not specified
 if [ -z "$SPIRV_CROSS_VERSION" ]; then
     echo "Querying GitHub for latest SPIRV-Cross Vulkan SDK tag..."
-    SPIRV_CROSS_VERSION=$(curl -s https://api.github.com/repos/KhronosGroup/SPIRV-Cross/tags | grep '"name"' | grep 'vulkan-sdk-' | head -1 | sed -E 's/.*"name": "([^"]+)".*/\1/')
+    SPIRV_CROSS_VERSION=$(curl -s ${GH_TOKEN:+-H "Authorization: token $GH_TOKEN"} https://api.github.com/repos/KhronosGroup/SPIRV-Cross/tags | grep '"name"' | grep 'vulkan-sdk-' | head -1 | sed -E 's/.*"name": "([^"]+)".*/\1/')
     if [ -z "$SPIRV_CROSS_VERSION" ]; then
         echo "Error: Could not determine latest SPIRV-Cross version, falling back to main"
         SPIRV_CROSS_VERSION="main"

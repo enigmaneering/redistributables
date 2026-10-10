@@ -29,6 +29,10 @@ on:
         type: string
 
 env:
+  # Every step may ask GitHub's API for a tool's latest release (the build
+  # scripts and the wasm steps do): authenticated, so a shared runner IP's
+  # rate limit cannot decide a leg - v0.0.88's SPIRV-Cross wasm leg fell to a 403.
+  GH_TOKEN: ${{ github.token }}
   # The slim clang asset's size cap in bytes: 160 MiB. package-clang.sh's
   # own default is 104857600 (100 MiB, the gameplan's figure); this is the
   # measured reality - v0.0.85's linux-amd64 asset weighed 125,933,623 B
@@ -513,7 +517,7 @@ jobs:
         if: matrix.wasm
         shell: bash
         run: |
-          GLSLANG_VERSION=$(curl -s https://api.github.com/repos/KhronosGroup/glslang/releases/latest | grep '"tag_name"' | sed -E 's/.*"tag_name": "([^"]+)".*/\1/')
+          GLSLANG_VERSION=$(curl -s -H "Authorization: token $GH_TOKEN" https://api.github.com/repos/KhronosGroup/glslang/releases/latest | grep '"tag_name"' | sed -E 's/.*"tag_name": "([^"]+)".*/\1/')
           echo "Building glslang $GLSLANG_VERSION for WASM..."
 
           mkdir -p wasm-build && cd wasm-build
@@ -700,8 +704,8 @@ jobs:
           # Both architectures of the two dev packages in one request: they are
           # Multi-Arch: same, co-installable only at one version, and the runner
           # image already carries the amd64 ones - apt may have to move those.
-          sudo apt-get install -y --no-install-recommends g++-riscv64-linux-gnu libc6-dev-riscv64-cross libstdc++-13-dev-riscv64-cross binutils-riscv64-linux-gnu pkg-config cmake libssl-dev libssl-dev:riscv64 libudev-dev libudev-dev:riscv64
-          ls /usr/lib/riscv64-linux-gnu/libcrypto.a /usr/lib/riscv64-linux-gnu/pkgconfig/libudev.pc
+          sudo apt-get install -y --no-install-recommends g++-riscv64-linux-gnu libc6-dev-riscv64-cross libstdc++-13-dev-riscv64-cross binutils-riscv64-linux-gnu pkg-config cmake libssl-dev libssl-dev:riscv64 libudev-dev libudev-dev:riscv64 zlib1g-dev zlib1g-dev:riscv64
+          ls /usr/lib/riscv64-linux-gnu/libcrypto.a /usr/lib/riscv64-linux-gnu/pkgconfig/libudev.pc /usr/lib/riscv64-linux-gnu/pkgconfig/zlib.pc
 
       - name: Install OpenSSL (macOS)
         if: startsWith(matrix.platform, 'darwin-')
@@ -886,7 +890,7 @@ jobs:
           # Match build-spirv-cross.sh: filter for Vulkan SDK release tags, not
           # whatever GitHub returns as the first tag (which can be a lightweight
           # intermediate tag or empty on rate-limit).
-          SPIRV_CROSS_VERSION=$(curl -sSLf https://api.github.com/repos/KhronosGroup/SPIRV-Cross/tags | grep '"name"' | grep 'vulkan-sdk-' | head -1 | sed -E 's/.*"name": "([^"]+)".*/\1/')
+          SPIRV_CROSS_VERSION=$(curl -sSLf -H "Authorization: token $GH_TOKEN" https://api.github.com/repos/KhronosGroup/SPIRV-Cross/tags | grep '"name"' | grep 'vulkan-sdk-' | head -1 | sed -E 's/.*"name": "([^"]+)".*/\1/')
           if [ -z "$SPIRV_CROSS_VERSION" ]; then
             echo "Error: could not determine latest SPIRV-Cross vulkan-sdk tag (rate-limited?)"
             exit 1

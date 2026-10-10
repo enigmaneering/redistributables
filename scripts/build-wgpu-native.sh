@@ -21,7 +21,7 @@ OUTPUT_DIR="${OUTPUT_DIR:-$SCRIPT_DIR/../output}"
 
 if [ -z "$WGPU_VERSION" ]; then
     echo "Querying GitHub for latest wgpu-native release..."
-    WGPU_VERSION=$(curl -s https://api.github.com/repos/gfx-rs/wgpu-native/releases/latest | grep '"tag_name"' | sed -E 's/.*"tag_name": "([^"]+)".*/\1/')
+    WGPU_VERSION=$(curl -s ${GH_TOKEN:+-H "Authorization: token $GH_TOKEN"} https://api.github.com/repos/gfx-rs/wgpu-native/releases/latest | grep '"tag_name"' | sed -E 's/.*"tag_name": "([^"]+)".*/\1/')
     [ -n "$WGPU_VERSION" ] || { echo "Error: could not determine the latest wgpu-native release"; exit 1; }
     echo "Latest wgpu-native release: $WGPU_VERSION"
 fi
@@ -39,7 +39,6 @@ CARGO_TARGET=""
 CARGO_TARGET_FLAG=""
 if [ "${CMAKE_ARCH:-}" = "riscv64" ]; then
     CARGO_TARGET="riscv64gc-unknown-linux-gnu"
-    rustup target add "$CARGO_TARGET"
     CARGO_TARGET_FLAG="--target $CARGO_TARGET"
     export CARGO_TARGET_RISCV64GC_UNKNOWN_LINUX_GNU_LINKER=riscv64-linux-gnu-gcc
     export CC_riscv64gc_unknown_linux_gnu=riscv64-linux-gnu-gcc
@@ -60,6 +59,13 @@ cd wgpu-native
 for f in LICENSE.MIT LICENSE.APACHE ffi/webgpu-headers/webgpu.h ffi/wgpu.h; do
     [ -f "$f" ] || { echo "Error: $f not found in wgpu-native $WGPU_VERSION"; exit 1; }
 done
+# From inside the checkout: wgpu-native pins its toolchain (rust-toolchain.toml,
+# 1.93 at v29), and rustup installs the target on whichever toolchain the
+# current directory selects. Added outside, it lands on the default toolchain
+# and cargo in here cannot find core for the target.
+if [ -n "$CARGO_TARGET" ]; then
+    rustup target add "$CARGO_TARGET"
+fi
 
 cargo build --release $CARGO_TARGET_FLAG
 

@@ -12,7 +12,7 @@ OUTPUT_DIR="${OUTPUT_DIR:-$SCRIPT_DIR/../output}"
 # Naga is now part of the wgpu project
 if [ -z "$NAGA_VERSION" ]; then
     echo "Querying GitHub for latest wgpu release..."
-    NAGA_VERSION=$(curl -s https://api.github.com/repos/gfx-rs/wgpu/releases/latest | grep '"tag_name"' | sed -E 's/.*"tag_name": "([^"]+)".*/\1/')
+    NAGA_VERSION=$(curl -s ${GH_TOKEN:+-H "Authorization: token $GH_TOKEN"} https://api.github.com/repos/gfx-rs/wgpu/releases/latest | grep '"tag_name"' | sed -E 's/.*"tag_name": "([^"]+)".*/\1/')
     if [ -z "$NAGA_VERSION" ]; then
         echo "Warning: Could not determine latest wgpu version, using v28.0.0"
         NAGA_VERSION="v28.0.0"

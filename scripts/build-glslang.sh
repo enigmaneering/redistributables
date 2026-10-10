@@ -11,7 +11,7 @@ OUTPUT_DIR="${OUTPUT_DIR:-$SCRIPT_DIR/../output}"
 # Query GitHub for latest release if not specified
 if [ -z "$GLSLANG_VERSION" ]; then
     echo "Querying GitHub for latest glslang release..."
-    GLSLANG_VERSION=$(curl -s https://api.github.com/repos/KhronosGroup/glslang/releases/latest | grep '"tag_name"' | sed -E 's/.*"tag_name": "([^"]+)".*/\1/')
+    GLSLANG_VERSION=$(curl -s ${GH_TOKEN:+-H "Authorization: token $GH_TOKEN"} https://api.github.com/repos/KhronosGroup/glslang/releases/latest | grep '"tag_name"' | sed -E 's/.*"tag_name": "([^"]+)".*/\1/')
     if [ -z "$GLSLANG_VERSION" ]; then
         echo "Error: Could not determine latest glslang version, falling back to main"
         GLSLANG_VERSION="main"

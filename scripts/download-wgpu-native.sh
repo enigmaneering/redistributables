@@ -11,7 +11,7 @@ OUTPUT_DIR="${OUTPUT_DIR:-$SCRIPT_DIR/../output}"
 # Query GitHub for latest wgpu-native release if not specified
 if [ -z "$WGPU_VERSION" ]; then
     echo "Querying GitHub for latest wgpu-native release..."
-    WGPU_VERSION=$(curl -s https://api.github.com/repos/gfx-rs/wgpu-native/releases/latest | grep '"tag_name"' | sed -E 's/.*"tag_name": "([^"]+)".*/\1/')
+    WGPU_VERSION=$(curl -s ${GH_TOKEN:+-H "Authorization: token $GH_TOKEN"} https://api.github.com/repos/gfx-rs/wgpu-native/releases/latest | grep '"tag_name"' | sed -E 's/.*"tag_name": "([^"]+)".*/\1/')
     if [ -z "$WGPU_VERSION" ]; then
         echo "Warning: Could not determine latest wgpu-native version, using v27.0.4.0"
         WGPU_VERSION="v27.0.4.0"
