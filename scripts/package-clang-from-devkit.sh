@@ -20,7 +20,8 @@ set -eu
 # Inputs (environment; the workflow's "Package slim clang from the cached
 # dev kit" steps set them, a local run sets them by hand):
 #   PLATFORM     darwin-arm64 | darwin-amd64 | linux-amd64 | linux-arm64 |
-#                windows-amd64 | windows-arm64 (no slim clang for wasm)   required
+#                linux-riscv64 | windows-amd64 | windows-arm64
+#                (no slim clang for wasm)                                 required
 #   OUTPUT_DIR   where the cache restored llvm-<platform>.tar.gz; the asset
 #                clang-<platform>.tar.gz and its .report.txt land here     required
 #   WORK_DIR     where the needed dev kit members are extracted (outside
@@ -40,8 +41,15 @@ for v in PLATFORM OUTPUT_DIR WORK_DIR; do
 done
 case "$PLATFORM" in
     windows-amd64|windows-arm64) EXE=".exe" ;;
-    darwin-arm64|darwin-amd64|linux-amd64|linux-arm64) EXE="" ;;
-    *) die "no slim clang is built for PLATFORM='$PLATFORM' (six native platforms only, no wasm)" ;;
+    darwin-arm64|darwin-amd64|linux-amd64|linux-arm64|linux-riscv64) EXE="" ;;
+    *) die "no slim clang is built for PLATFORM='$PLATFORM' (seven native platforms only, no wasm)" ;;
+esac
+# The cross kit (linux-riscv64 made on an x86_64 builder) carries the
+# builder's own LLVM tools under native/bin; package-clang.sh strips and
+# reads the asset with those rather than running the kit's under qemu.
+CROSS=0
+case "$(uname -s):$PLATFORM" in
+    Linux:linux-*) [ "${PLATFORM#linux-}" = "$(uname -m | sed 's/x86_64/amd64/; s/aarch64/arm64/')" ] || CROSS=1 ;;
 esac
 # MSYS2: ${{ runner.temp }} arrives Windows-native (D:\a\_temp); tar would
 # read the drive letter's colon as host:path. common.sh does the same for
@@ -116,6 +124,10 @@ EXTRAS=("$KIT_NAME/bin/llvm-objcopy$EXE" "$KIT_NAME/bin/llvm-readelf$EXE")
 for m in "${EXTRAS[@]}"; do
     if grep -qxF "$m" "$LIST"; then MEMBERS+=("$m"); fi
 done
+if [ "$CROSS" -eq 1 ]; then
+    grep -qxF "$KIT_NAME/native/bin/llvm-strip" "$LIST" || die "the cross dev kit lacks native/bin/llvm-strip (build-llvm.sh bundles the Phase 1 tools there)"
+    MEMBERS+=("$KIT_NAME/native")
+fi
 if [ -z "$EXE" ]; then
     REAL="$(grep -E "^$KIT_NAME/bin/clang-[0-9]+$" "$LIST" || true)"
     [ -n "$REAL" ] || die "the dev kit has no bin/clang-<major> (on unix bin/clang is a link to it)"
@@ -143,6 +155,8 @@ ls -la "$ROOT/bin"
 say "running package-clang.sh (LLVM_INSTALL_DIR=$ROOT, LLVM_SOURCE_DIR=$ROOT/src, PLATFORM=$PLATFORM, OUTPUT_DIR=$OUTPUT_DIR, cap ${CLANG_ASSET_MAX_BYTES:-<script default>})"
 LLVM_INSTALL_DIR="$ROOT" \
 LLVM_SOURCE_DIR="$ROOT/src" \
+LLVM_NATIVE_TOOLS_DIR="$([ "$CROSS" -eq 1 ] && echo "$ROOT/native/bin")" \
+PACKAGE_CLANG_REQUIRE_EXEC="${PACKAGE_CLANG_REQUIRE_EXEC:-$CROSS}" \
 PLATFORM="$PLATFORM" \
 LLVM_TAG="$LLVM_TAG" \
 OUTPUT_DIR="$OUTPUT_DIR" \

@@ -18,6 +18,10 @@ set -e
 #          headers come from Homebrew openssl@3.  HID uses IOKit natively.
 # Linux:   source-build libfido2 + libcbor + hidapi (hidraw backend) via
 #          CMake.  libcrypto + openssl headers come from libssl-dev.
+#          linux-riscv64 is cross-compiled on the x86_64 runner (CMAKE_ARCH=
+#          riscv64, PLATFORM_OVERRIDE=linux-riscv64): Ubuntu's riscv64 cross
+#          toolchain, and libssl-dev:riscv64 + libudev-dev:riscv64 from the
+#          ports archive (Debian multiarch) for libcrypto and udev.
 # Windows: source-build ALL FOUR (openssl + libcbor + libfido2) with the
 #          MSYS2 MinGW toolchain (mingw64 target for windows-amd64,
 #          mingwarm64 target for windows-arm64 via llvm-mingw cross-compile).
@@ -53,12 +57,25 @@ elif [[ "$OSTYPE" == "darwin"* ]]; then
     if [ -n "$MACOS_ARCH" ]; then ARCH="$MACOS_ARCH"; fi
     PLATFORM="darwin-$ARCH"
 elif [[ "$OSTYPE" == "linux-gnu"* ]]; then
-    PLATFORM="linux-$(uname -m)"
+    PLATFORM="linux-${CMAKE_ARCH:-$(uname -m)}"
 elif [[ "$OSTYPE" == "msys" || "$OSTYPE" == "win32" || "$OSTYPE" == "cygwin" ]]; then
     ARCH=$(uname -m)
     PLATFORM="windows-$ARCH"
 fi
 PLATFORM=$(echo "$PLATFORM" | sed 's/x86_64/amd64/g' | sed 's/aarch64/arm64/g')
+
+# Linux cross-compilation for RISC-V. CMAKE_CROSS_FLAGS threads through every
+# cmake call below; pkg-config answers for the target's multiarch libdir, so
+# hidapi finds the riscv64 libudev and libfido2 the riscv64 libcrypto, and
+# the packaging step below copies that same libcrypto.a.
+CMAKE_CROSS_FLAGS=""
+CROSS_MULTIARCH=""
+if [[ "$OSTYPE" == "linux-gnu"* ]] && [ -n "$CMAKE_ARCH" ] && [ "$CMAKE_ARCH" = "riscv64" ]; then
+    CROSS_MULTIARCH="riscv64-linux-gnu"
+    CMAKE_CROSS_FLAGS="-DCMAKE_SYSTEM_NAME=Linux -DCMAKE_SYSTEM_PROCESSOR=riscv64 -DCMAKE_C_COMPILER=$CROSS_MULTIARCH-gcc -DCMAKE_CXX_COMPILER=$CROSS_MULTIARCH-g++"
+    export PKG_CONFIG_LIBDIR="/usr/lib/$CROSS_MULTIARCH/pkgconfig:/usr/share/pkgconfig"
+    echo "Cross-compile: $PLATFORM with $CROSS_MULTIARCH-gcc; pkg-config from /usr/lib/$CROSS_MULTIARCH/pkgconfig"
+fi
 
 echo "Building libfido2 for $PLATFORM..."
 
@@ -350,7 +367,7 @@ cmake ../"libcbor-${LIBCBOR_VERSION}" \
     -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
     -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
     -DCMAKE_INSTALL_PREFIX="$BUILD_DIR/libcbor-install-$PLATFORM" \
-    $CMAKE_OSX_ARCH_FLAG
+    $CMAKE_OSX_ARCH_FLAG $CMAKE_CROSS_FLAGS
 cmake --build . -j "$NCPU"
 cmake --install .
 cd "$BUILD_DIR"
@@ -388,7 +405,7 @@ if [[ "$PLATFORM" == linux-* ]]; then
         -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
         -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
         -DCMAKE_INSTALL_PREFIX="$BUILD_DIR/hidapi-install-$PLATFORM" \
-        $CMAKE_OSX_ARCH_FLAG
+        $CMAKE_OSX_ARCH_FLAG $CMAKE_CROSS_FLAGS
     cmake --build . -j "$NCPU"
     cmake --install .
     cd "$BUILD_DIR"
@@ -478,6 +495,10 @@ fi
 if [ -n "$CMAKE_OSX_ARCH_FLAG" ]; then
     CMAKE_ARGS+=("$CMAKE_OSX_ARCH_FLAG")
 fi
+if [ -n "$CMAKE_CROSS_FLAGS" ]; then
+    # shellcheck disable=SC2206
+    CMAKE_ARGS+=($CMAKE_CROSS_FLAGS)
+fi
 if [ -n "$FIDO2_CROSS_OPENSSL_PREFIX" ]; then
     CMAKE_ARGS+=(
         "-DCRYPTO_INCLUDE_DIRS=$FIDO2_CROSS_OPENSSL_PREFIX/include"
@@ -565,6 +586,12 @@ elif [[ "$PLATFORM" == linux-* ]]; then
     # Headers ship under /usr/include/openssl in the -dev package.
     if [ -d /usr/include/openssl ]; then
         cp -R /usr/include/openssl/. "$OUT/include/openssl/"
+    fi
+    # Debian/Ubuntu keep the architecture-specific openssl headers
+    # (configuration.h) under the multiarch include dir; a cross build ships
+    # the TARGET's over the host's, so a consumer compiles for riscv64.
+    if [ -n "$CROSS_MULTIARCH" ] && [ -d "/usr/include/$CROSS_MULTIARCH/openssl" ]; then
+        cp -R "/usr/include/$CROSS_MULTIARCH/openssl/." "$OUT/include/openssl/"
     fi
     # Debian/Ubuntu ships the OpenSSL LICENSE at /usr/share/doc/libssl-dev/copyright.
     if [ -f /usr/share/doc/libssl-dev/copyright ]; then

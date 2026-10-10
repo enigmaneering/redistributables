@@ -1,0 +1,84 @@
+name: board
+
+# The linux-riscv64 assets, proven on the silicon they are for: a VisionFive 2
+# registered as a self-hosted runner (labels self-hosted, linux, riscv64,
+# visionfive2). build-release.yml makes them on ubuntu-latest with Ubuntu's
+# riscv64 cross toolchain and runs them under qemu-user; this runs the same
+# checks natively, on the artifacts of the run that just finished. A workflow
+# of its own, as in stdsyn: a job bound to the board queues while she is off,
+# and that must never hold build-release's verdict.
+on:
+  workflow_run:
+    workflows: ["Build and Release Redistributables"]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: the build-release run whose linux-riscv64 artifacts to verify
+        required: true
+
+concurrency:
+  group: board
+  cancel-in-progress: false
+
+jobs:
+  riscv64:
+    name: linux-riscv64 on the VisionFive 2
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    runs-on: [self-hosted, linux, riscv64, visionfive2]
+    timeout-minutes: 45
+    steps:
+      - name: Download the linux-riscv64 artifacts
+        uses: actions/download-artifact@v4
+        with:
+          # Not the 2 GB dev kit: the board has a 7.5 GB eMMC. minimatch braces.
+          pattern: "{clang,clspv,spirv-llvm-translator}-linux-riscv64"
+          merge-multiple: true
+          path: assets
+          run-id: ${{ github.event.workflow_run.id || inputs.run_id }}
+          github-token: ${{ github.token }}
+
+      - name: The board and what arrived
+        run: |
+          uname -m && grep -m1 isa /proc/cpuinfo && ldd --version | head -1
+          ls -la assets
+
+      # package-clang.sh's execution checks, natively: the asset starts, names
+      # its pin, has every backend, compiles freestanding for the triples e
+      # uses, reads back what it emitted, and links a wasm module.
+      - name: The slim clang runs on riscv64
+        run: |
+          set -e
+          tar -xzf assets/clang-linux-riscv64.tar.gz
+          C="$PWD/clang-linux-riscv64/bin"
+          "$C/clang" --version
+          "$C/clang" --version | head -1 | grep -q "$(cat clang-linux-riscv64/VERSION)"
+          "$C/clang" -print-resource-dir
+          for b in x86-64 aarch64 riscv64 loongarch64 ppc64le systemz wasm32 wasm64 nvptx64 amdgcn spirv64; do
+            "$C/clang" -print-targets | grep -qE "^[[:space:]]+$b[[:space:]]+-" || { echo "backend $b missing"; exit 1; }
+          done
+          printf '#include <stdint.h>\n#include <stddef.h>\nuint64_t e_probe(const uint8_t *p, size_t n) { uint64_t a = 0; for (size_t i = 0; i < n; i++) a = a * 31u + p[i]; return a; }\n' > probe.c
+          for t in riscv64-unknown-linux-gnu x86_64-unknown-linux-gnu aarch64-unknown-linux-gnu wasm32-unknown-unknown; do
+            "$C/clang" --target=$t -ffreestanding -nostdlib -fno-builtin -O2 -c probe.c -o "probe-$t.o"
+            echo "compiled for $t"
+          done
+          "$C/llvm-objdump" -d probe-riscv64-unknown-linux-gnu.o | grep -q e_probe && echo "llvm-objdump reads the riscv64 object"
+          "$C/lld" -flavor wasm --no-entry --export=e_probe -o probe.wasm probe-wasm32-unknown-unknown.o && echo "lld links a wasm module"
+          "$C/wasm-ld" --version | head -1
+
+      # The static archives of the LLVM family are riscv64 objects. Present on
+      # a tag or dispatch run of build-release (clspv and the translator are
+      # gated there); absent on a push-to-main warm-up, which builds LLVM only.
+      - name: The archives are riscv64
+        run: |
+          set -e
+          n=0
+          for a in assets/clspv-linux-riscv64.tar.gz assets/spirv-llvm-translator-linux-riscv64.tar.gz; do
+            [ -f "$a" ] || { echo "$a not in this run (LLVM-only run)"; continue; }
+            tar -xzf "$a"
+            for lib in $(tar -tzf "$a" | grep '\.a$'); do
+              readelf -h "$lib" | grep -m1 'Machine:' | grep -q 'RISC-V' || { echo "$lib is not RISC-V"; readelf -h "$lib" | grep -m1 Machine; exit 1; }
+              echo "$lib: RISC-V"; n=$((n + 1))
+            done
+          done
+          echo "$n archives checked"

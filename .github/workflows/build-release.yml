@@ -8,7 +8,7 @@ on:
     # GitHub scopes a cache to the ref that made it, so a tag run never sees
     # another tag run's dev kits, and every tag build was cold (v0.0.83-86:
     # 1-3 h per leg). Caches made on the default branch are readable by every
-    # ref, so this run builds and caches the seven LLVM legs and nothing else -
+    # ref, so this run builds and caches the eight LLVM legs and nothing else -
     # every other job is gated on a tag below - and the next tag run restores
     # them and repackages the slim clang in minutes.
     branches:
@@ -416,6 +416,10 @@ jobs:
             cross_compile_target: aarch64
           - os: ubuntu-latest
             runner: ubuntu-latest
+            platform: linux-riscv64
+            cross: riscv64
+          - os: ubuntu-latest
+            runner: ubuntu-latest
             platform: wasm
             wasm: true
     runs-on: ${{ matrix.runner }}
@@ -484,6 +488,16 @@ jobs:
           CROSS_COMPILE_TARGET="${{ matrix.cross_compile_target || '' }}" \
           bash scripts/build-glslang.sh
 
+      - name: Install the riscv64 cross toolchain (linux-riscv64)
+        # The one cross leg among the native platforms: GitHub hosts no
+        # riscv64 runner, so ubuntu-latest builds with Ubuntu's own cross
+        # toolchain, and the build script takes CMAKE_ARCH=riscv64.
+        if: matrix.cross == 'riscv64'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends g++-riscv64-linux-gnu libc6-dev-riscv64-cross libstdc++-13-dev-riscv64-cross binutils-riscv64-linux-gnu
+          riscv64-linux-gnu-g++ --version | head -1
+
       - name: Build glslang (macOS/Linux)
         if: ${{ !matrix.mingw_arch && !matrix.wasm }}
         shell: bash
@@ -492,6 +506,7 @@ jobs:
           BUILD_DIR="${{ runner.temp }}/build" \
           OUTPUT_DIR="${{ runner.temp }}/output" \
           MACOS_ARCH="${{ matrix.macos_arch || '' }}" \
+          CMAKE_ARCH="${{ matrix.cross || '' }}" \
           bash scripts/build-glslang.sh
 
       - name: Build glslang (WASM)
@@ -610,6 +625,10 @@ jobs:
           - os: ubuntu-latest
             runner: ubuntu-24.04-arm
             platform: linux-arm64
+          - os: ubuntu-latest
+            runner: ubuntu-latest
+            platform: linux-riscv64
+            cross: riscv64
           - os: windows-latest
             runner: windows-latest
             platform: windows-amd64
@@ -658,6 +677,32 @@ jobs:
               pkg-config \
               cmake
 
+      - name: Install the riscv64 cross toolchain and multiarch libraries (linux-riscv64)
+        # The target's libcrypto and libudev come from Ubuntu's ports archive
+        # as riscv64 multiarch packages (Debian's way): the runner's own
+        # sources are confined to amd64 first, so apt does not look for
+        # riscv64 packages where there are none.
+        if: matrix.cross == 'riscv64'
+        run: |
+          set -e
+          sudo dpkg --add-architecture riscv64
+          for f in /etc/apt/sources.list.d/*.sources; do
+            [ -f "$f" ] || continue
+            grep -q '^Architectures:' "$f" || sudo sed -i 's/^Types: deb$/Types: deb\nArchitectures: amd64/' "$f"
+          done
+          for f in /etc/apt/sources.list /etc/apt/sources.list.d/*.list; do
+            [ -f "$f" ] || continue
+            # a bare "deb URL" line, and a "deb [signed-by=…]" line without arch=
+            sudo sed -i -E -e 's/^deb ([^[])/deb [arch=amd64] \1/' -e '/^deb \[[^]]*arch=/! s/^deb \[/deb [arch=amd64 /' "$f"
+          done
+          printf 'Types: deb\nURIs: http://ports.ubuntu.com/ubuntu-ports\nSuites: noble noble-updates noble-security\nComponents: main universe\nArchitectures: riscv64\nSigned-By: /usr/share/keyrings/ubuntu-archive-keyring.gpg\n' | sudo tee /etc/apt/sources.list.d/riscv64-ports.sources >/dev/null
+          sudo apt-get update
+          # Both architectures of the two dev packages in one request: they are
+          # Multi-Arch: same, co-installable only at one version, and the runner
+          # image already carries the amd64 ones - apt may have to move those.
+          sudo apt-get install -y --no-install-recommends g++-riscv64-linux-gnu libc6-dev-riscv64-cross libstdc++-13-dev-riscv64-cross binutils-riscv64-linux-gnu pkg-config cmake libssl-dev libssl-dev:riscv64 libudev-dev libudev-dev:riscv64
+          ls /usr/lib/riscv64-linux-gnu/libcrypto.a /usr/lib/riscv64-linux-gnu/pkgconfig/libudev.pc
+
       - name: Install OpenSSL (macOS)
         if: startsWith(matrix.platform, 'darwin-')
         run: |
@@ -686,6 +731,8 @@ jobs:
           BUILD_DIR="${{ runner.temp }}/build" \
           OUTPUT_DIR="${{ runner.temp }}/output" \
           MACOS_ARCH="${{ matrix.macos_arch || '' }}" \
+          CMAKE_ARCH="${{ matrix.cross || '' }}" \
+          PLATFORM_OVERRIDE="${{ matrix.cross && matrix.platform || '' }}" \
           bash scripts/build-libfido2.sh
 
       - name: Build libfido2 (Windows — MSYS2 native)
@@ -742,6 +789,10 @@ jobs:
             platform: windows-arm64
             mingw_arch: x86_64
             cross_compile_target: aarch64
+          - os: ubuntu-latest
+            runner: ubuntu-latest
+            platform: linux-riscv64
+            cross: riscv64
           - os: ubuntu-latest
             runner: ubuntu-latest
             platform: wasm
@@ -807,6 +858,16 @@ jobs:
           CROSS_COMPILE_TARGET="${{ matrix.cross_compile_target || '' }}" \
           bash scripts/build-spirv-cross.sh
 
+      - name: Install the riscv64 cross toolchain (linux-riscv64)
+        # The one cross leg among the native platforms: GitHub hosts no
+        # riscv64 runner, so ubuntu-latest builds with Ubuntu's own cross
+        # toolchain, and the build script takes CMAKE_ARCH=riscv64.
+        if: matrix.cross == 'riscv64'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends g++-riscv64-linux-gnu libc6-dev-riscv64-cross libstdc++-13-dev-riscv64-cross binutils-riscv64-linux-gnu
+          riscv64-linux-gnu-g++ --version | head -1
+
       - name: Build SPIRV-Cross (macOS/Linux)
         if: ${{ !matrix.mingw_arch && !matrix.wasm }}
         shell: bash
@@ -815,6 +876,7 @@ jobs:
           BUILD_DIR="${{ runner.temp }}/build" \
           OUTPUT_DIR="${{ runner.temp }}/output" \
           MACOS_ARCH="${{ matrix.macos_arch || '' }}" \
+          CMAKE_ARCH="${{ matrix.cross || '' }}" \
           bash scripts/build-spirv-cross.sh
 
       - name: Build SPIRV-Cross (WASM)
@@ -1020,6 +1082,14 @@ jobs:
             platform: windows-arm64
             msys_subsystem: CLANGARM64
             mingw_pkg_prefix: clang-aarch64
+          # The one cross leg among the native platforms: GitHub hosts no
+          # riscv64 runner, so ubuntu-latest builds linux-riscv64 with Ubuntu's
+          # own cross toolchain (scripts/common.sh's IS_CROSS - the two-phase
+          # shape wasm has) and runs what it built under qemu-user; board.yml
+          # then proves the artifacts on a VisionFive 2.
+          - runner: ubuntu-latest
+            platform: linux-riscv64
+            cross: riscv64
           - runner: ubuntu-latest
             platform: wasm
             wasm: true
@@ -1031,7 +1101,7 @@ jobs:
         id: cache-llvm
         uses: actions/cache@v4
         with:
-          # Both deliverables of one build: the dev kit and, on the six
+          # Both deliverables of one build: the dev kit and, on the seven
           # native platforms, the slim clang asset plus its report. The
           # clang glob matches nothing on wasm, which actions/cache
           # tolerates as long as one path matches. A cache hit skips the
@@ -1054,6 +1124,22 @@ jobs:
           # package-clang.sh is in the key because it decides what the
           # cached clang asset contains.
           key: llvm-${{ matrix.platform }}-${{ needs.determine-shas.outputs.llvm_sha }}-${{ matrix.mingw_pkg_prefix }}-${{ hashFiles('scripts/build-llvm.sh', 'scripts/common.sh', 'scripts/package-clang.sh') }}
+
+      - name: Install the riscv64 cross toolchain (linux-riscv64)
+        # Ubuntu's cross gcc with the -cross libc and libstdc++ (static
+        # libstdc++ comes from the -dev package), binutils for the target,
+        # and qemu-user-static, whose binfmt_misc registration lets the
+        # target's binaries run here transparently (QEMU_LD_PREFIX, set by
+        # scripts/common.sh, points qemu at the cross libc's loader), and
+        # ninja, the one generator that honours LLVM's link-job cap. Not gated on the cache: the
+        # cache-hit packaging below runs the restored asset under qemu too.
+        if: matrix.cross == 'riscv64'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends g++-riscv64-linux-gnu libc6-dev-riscv64-cross libstdc++-13-dev-riscv64-cross binutils-riscv64-linux-gnu qemu-user-static ninja-build
+          riscv64-linux-gnu-g++ --version | head -1
+          qemu-riscv64-static --version | head -1
+          ninja --version
 
       - name: Install dependencies (Linux ARM64)
         if: steps.cache-llvm.outputs.cache-hit != 'true' && matrix.platform == 'linux-arm64'
@@ -1117,7 +1203,7 @@ jobs:
 
       # A cache hit skipped the build, and the cache holds the dev kit
       # (llvm-<platform>.tar.gz) - whether it also holds a slim asset is
-      # the cache's business, not the release's. The six native legs make
+      # the cache's business, not the release's. The seven native legs make
       # clang-<platform>.tar.gz again from the restored dev kit, with the
       # same package-clang.sh over the same bytes (the kit's bin/ tools and
       # builtin headers, its VERSION, the license texts of its bundled src/
@@ -1154,6 +1240,11 @@ jobs:
           WORK_DIR: ${{ runner.temp }}/devkit
           LLVM_SHA: ${{ needs.determine-shas.outputs.llvm_sha }}
           # CLANG_ASSET_MAX_BYTES: the workflow-level env, same as the build.
+          # The cross leg's asset runs here under qemu-user (binfmt_misc, from
+          # the install step above): the cross libc's loader for qemu, and the
+          # execution checks required rather than skipped.
+          QEMU_LD_PREFIX: ${{ matrix.cross == 'riscv64' && '/usr/riscv64-linux-gnu' || '' }}
+          PACKAGE_CLANG_REQUIRE_EXEC: ${{ matrix.cross && '1' || '0' }}
         run: bash scripts/package-clang-from-devkit.sh
 
       - name: Package slim clang from the cached dev kit (Windows)
@@ -1178,7 +1269,7 @@ jobs:
       # native platforms, or by the cache-hit steps above over the cached
       # dev kit) and its report .txt rides along for the release job's
       # summary. A missing tarball is an error, never a silent skip: a
-      # release without all six is a release e cannot pin.
+      # release without all seven is a release e cannot pin.
       - name: Upload slim clang
         if: matrix.platform != 'wasm'
         uses: actions/upload-artifact@v4
@@ -1215,6 +1306,14 @@ jobs:
             platform: windows-arm64
             msys_subsystem: CLANGARM64
             mingw_pkg_prefix: clang-aarch64
+          # The one cross leg among the native platforms: GitHub hosts no
+          # riscv64 runner, so ubuntu-latest builds linux-riscv64 with Ubuntu's
+          # own cross toolchain (scripts/common.sh's IS_CROSS - the two-phase
+          # shape wasm has) and runs what it built under qemu-user; board.yml
+          # then proves the artifacts on a VisionFive 2.
+          - runner: ubuntu-latest
+            platform: linux-riscv64
+            cross: riscv64
           - runner: ubuntu-latest
             platform: wasm
             wasm: true
@@ -1255,6 +1354,21 @@ jobs:
       - name: Extract LLVM
         if: steps.cache-clspv.outputs.cache-hit != 'true'
         run: tar -xzf artifacts/llvm-${{ matrix.platform }}.tar.gz
+
+      - name: Install the riscv64 cross toolchain (linux-riscv64)
+        # Ubuntu's cross gcc with the -cross libc and libstdc++ (static
+        # libstdc++ comes from the -dev package), binutils for the target,
+        # and qemu-user-static, whose binfmt_misc registration lets the
+        # target's binaries run here transparently (QEMU_LD_PREFIX, set by
+        # scripts/common.sh, points qemu at the cross libc's loader), and
+        # ninja, the one generator that honours LLVM's link-job cap.
+        if: steps.cache-clspv.outputs.cache-hit != 'true' && matrix.cross == 'riscv64'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends g++-riscv64-linux-gnu libc6-dev-riscv64-cross libstdc++-13-dev-riscv64-cross binutils-riscv64-linux-gnu qemu-user-static ninja-build
+          riscv64-linux-gnu-g++ --version | head -1
+          qemu-riscv64-static --version | head -1
+          ninja --version
 
       - name: Setup Python
         if: steps.cache-clspv.outputs.cache-hit != 'true' && runner.os != 'Windows'
@@ -1343,6 +1457,14 @@ jobs:
             platform: windows-arm64
             msys_subsystem: CLANGARM64
             mingw_pkg_prefix: clang-aarch64
+          # The one cross leg among the native platforms: GitHub hosts no
+          # riscv64 runner, so ubuntu-latest builds linux-riscv64 with Ubuntu's
+          # own cross toolchain (scripts/common.sh's IS_CROSS - the two-phase
+          # shape wasm has) and runs what it built under qemu-user; board.yml
+          # then proves the artifacts on a VisionFive 2.
+          - runner: ubuntu-latest
+            platform: linux-riscv64
+            cross: riscv64
           - runner: ubuntu-latest
             platform: wasm
             wasm: true
@@ -1373,6 +1495,21 @@ jobs:
       - name: Extract LLVM
         if: steps.cache-translator.outputs.cache-hit != 'true'
         run: tar -xzf artifacts/llvm-${{ matrix.platform }}.tar.gz
+
+      - name: Install the riscv64 cross toolchain (linux-riscv64)
+        # Ubuntu's cross gcc with the -cross libc and libstdc++ (static
+        # libstdc++ comes from the -dev package), binutils for the target,
+        # and qemu-user-static, whose binfmt_misc registration lets the
+        # target's binaries run here transparently (QEMU_LD_PREFIX, set by
+        # scripts/common.sh, points qemu at the cross libc's loader), and
+        # ninja, the one generator that honours LLVM's link-job cap.
+        if: steps.cache-translator.outputs.cache-hit != 'true' && matrix.cross == 'riscv64'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends g++-riscv64-linux-gnu libc6-dev-riscv64-cross libstdc++-13-dev-riscv64-cross binutils-riscv64-linux-gnu qemu-user-static ninja-build
+          riscv64-linux-gnu-g++ --version | head -1
+          qemu-riscv64-static --version | head -1
+          ninja --version
 
       - name: Install MinGW (Windows)
         # Must match the toolchain LLVM was built with — UCRT64 on
@@ -1451,6 +1588,9 @@ jobs:
             platform: windows-arm64
             cross_compile_target: aarch64
           - runner: ubuntu-latest
+            platform: linux-riscv64
+            cross: riscv64
+          - runner: ubuntu-latest
             platform: wasm
             wasm: true
     runs-on: ${{ matrix.runner }}
@@ -1465,6 +1605,14 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
+
+      - name: Install cross-compilation tools (linux-riscv64)
+        # Rust's riscv64gc-unknown-linux-gnu target (build-naga.sh adds it)
+        # links with Ubuntu's cross gcc.
+        if: matrix.cross == 'riscv64'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends g++-riscv64-linux-gnu libc6-dev-riscv64-cross libstdc++-13-dev-riscv64-cross binutils-riscv64-linux-gnu
 
       # ---- Windows MinGW toolchain ----
       # Rust now targets *-pc-windows-gnu(llvm) on Windows to match the
@@ -1540,7 +1688,7 @@ jobs:
           BUILD_DIR="${{ runner.temp }}/build" \
           OUTPUT_DIR="${{ runner.temp }}/output" \
           MACOS_ARCH="${{ matrix.macos_arch || '' }}" \
-          CMAKE_ARCH="${{ matrix.platform == 'linux-arm64' && 'aarch64' || '' }}" \
+          CMAKE_ARCH="${{ matrix.platform == 'linux-arm64' && 'aarch64' || matrix.cross || '' }}" \
           bash scripts/build-naga.sh
 
       - name: Upload artifact
@@ -1575,11 +1723,48 @@ jobs:
           - platform: windows-arm64
             os: windows-latest
             wgpu_platform: windows-aarch64-msvc
+          # gfx-rs publishes no riscv64 binary: built from the same tag with
+          # Rust's riscv64gc target (scripts/build-wgpu-native.sh).
+          - platform: linux-riscv64
+            os: ubuntu-latest
+            source: true
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
 
+      - name: Install Rust (source build)
+        if: matrix.source
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install the riscv64 cross toolchain and libclang (source build)
+        # The cross gcc links the cdylib; libclang serves wgpu-native's
+        # bindgen, which runs on the builder over the target's headers.
+        if: matrix.source
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends g++-riscv64-linux-gnu libc6-dev-riscv64-cross libstdc++-13-dev-riscv64-cross binutils-riscv64-linux-gnu libclang-dev
+
+      - name: Build wgpu-native from source
+        if: matrix.source
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # The same release the download legs take: the latest, resolved
+          # the same way (authenticated to avoid rate limits).
+          LATEST_RELEASE=$(curl -sH "Authorization: token $GH_TOKEN" https://api.github.com/repos/gfx-rs/wgpu-native/releases/latest)
+          VERSION=$(echo "$LATEST_RELEASE" | grep '"tag_name"' | sed -E 's/.*"tag_name": "([^"]+)".*/\1/')
+          [ -n "$VERSION" ] || { echo "::error::could not determine the latest wgpu-native release"; exit 1; }
+          echo "Building wgpu-native $VERSION for ${{ matrix.platform }}"
+          chmod +x scripts/build-wgpu-native.sh
+          BUILD_DIR="${{ runner.temp }}/build" \
+          OUTPUT_DIR="$(pwd)/output" \
+          WGPU_VERSION="$VERSION" \
+          CMAKE_ARCH="riscv64" \
+          bash scripts/build-wgpu-native.sh
+
       - name: Download wgpu-native
+        if: ${{ !matrix.source }}
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
@@ -1790,8 +1975,8 @@ jobs:
             fi
           done
           # One per native platform (build-llvm's matrix minus wasm).
-          if [ "$n" -ne 6 ]; then
-            echo "::error::expected 6 clang-<platform>.tar.gz assets, found $n"
+          if [ "$n" -ne 7 ]; then
+            echo "::error::expected 7 clang-<platform>.tar.gz assets, found $n"
             FAILED=1
           fi
           for r in artifacts/**/clang-*.report.txt; do
@@ -1814,8 +1999,8 @@ jobs:
 
       - name: Create redistributables Release
         # softprops/action-gh-release@v1 uploads all release assets
-        # concurrently. Our release is ~9GB across 64 assets (seven
-        # LLVM artifacts alone are 1–1.9GB each; the six clang-* slim
+        # concurrently. Our release is ~9GB across 64 assets (eight
+        # LLVM artifacts alone are 1–1.9GB each; the seven clang-* slim
         # assets are small). Parallel Node.js
         # uploads of that payload reliably OOM the runner — the Actions
         # infra sends a "runner has received a shutdown signal" ~30s

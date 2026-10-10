@@ -4,9 +4,15 @@ set -e
 # Build LLVM + Clang (+ LLD on the native platforms) for libmental.
 # Produces the llvm-<platform> dev kit (static archives, headers, tools and the
 # full source tree) that clspv and spirv-llvm-translator build against, and —
-# on the six native platforms — the slim clang-<platform> asset that
+# on the seven native platforms — the slim clang-<platform> asset that
 # enigmatic's `e fetch clang` installs (scripts/package-clang.sh, from the
 # SAME build tree, so e's compiler on every host is this release's compiler).
+#
+# Two of the platforms are built in two phases, native tools first: wasm, and
+# linux-riscv64, which ubuntu-latest cross-compiles (common.sh's IS_CROSS)
+# because GitHub hosts no riscv64 runner. The riscv64 kit is a native kit in
+# every other respect - cmake --install, the slim clang, lld - and its tools
+# are verified by running them under qemu-user.
 
 . "$(dirname "$0")/common.sh"
 
@@ -81,23 +87,33 @@ if [ ! -f "llvm-project/llvm/LICENSE.TXT" ]; then
     echo "Error: LLVM LICENSE not found"; exit 1
 fi
 
-# WASM: build native tools first. Tablegen must run on the host during
-# cross-compile (Phase 2). We also build native clang + llvm-link here so
-# the WASM artifact ships a natively-executable toolchain for downstream
+# WASM and cross: build native tools first. Tablegen must run on the host
+# during cross-compile (Phase 2). We also build native clang + llvm-link here
+# so the artifact ships a natively-executable toolchain for downstream
 # consumers that need to emit LLVM bitcode on the host (e.g. clspv's libclc
 # build, which compiles .cl → spir-- .bc using a real process-exec'd clang).
-# These native binaries end up in $PACKAGE_DIR/bin-native/ (see packaging
-# step below); they are x86_64 Linux since the WASM LLVM job runs there.
-if [ "$IS_WASM" -eq 1 ]; then
-    echo "=== WASM Phase 1: Building native tools (tablegen + clang + llvm-link) ==="
+# These native binaries end up in $PACKAGE_DIR/native/ (see packaging step
+# below); they are the build host's - x86_64 Linux on ubuntu-latest. For the
+# cross platform they also strip and read the target's binaries at packaging
+# time, which the kit's own (target) tools could only do under qemu.
+if [ "$IS_WASM" -eq 1 ] || [ "$IS_CROSS" -eq 1 ]; then
+    echo "=== Phase 1 ($PLATFORM): Building native tools (tablegen + clang + llvm-link) ==="
     cd llvm-project
     mkdir -p build-native
     cd build-native
 
+    # Native: the builder's own backend (X86 on ubuntu-latest - what this
+    # phase always built there), and the default target triple spelled out
+    # from the host compiler rather than left to LLVM: LLVM leaves it empty
+    # when the host's backend is absent (and a cached configure keeps an
+    # empty one), and a clang with no default triple fails libclc's CMake
+    # compiler test with "unknown target triple 'unknown'".
+    HOST_MACHINE="$(${CC:-cc} -dumpmachine 2>/dev/null || true)"
     $CMAKE ../llvm \
         -DCMAKE_BUILD_TYPE=Release \
         -DLLVM_ENABLE_PROJECTS="clang" \
-        -DLLVM_TARGETS_TO_BUILD="X86" \
+        -DLLVM_TARGETS_TO_BUILD="Native" \
+        ${HOST_MACHINE:+-DLLVM_DEFAULT_TARGET_TRIPLE=$HOST_MACHINE} \
         -DLLVM_INCLUDE_TESTS=OFF \
         -DLLVM_INCLUDE_EXAMPLES=OFF \
         -DLLVM_INCLUDE_BENCHMARKS=OFF \
@@ -115,7 +131,7 @@ if [ "$IS_WASM" -eq 1 ]; then
         --target llvm-min-tblgen llvm-tblgen clang-tblgen llvm-config \
                  clang llvm-as llvm-link opt \
                  llvm-ar llvm-dis llvm-nm llvm-objcopy llvm-objdump \
-                 llvm-ranlib llvm-readobj llvm-strip \
+                 llvm-ranlib llvm-readobj llvm-readelf llvm-strip \
         -j$NCPU
 
     NATIVE_TOOLS_DIR="$(pwd)/bin"
@@ -123,8 +139,54 @@ if [ "$IS_WASM" -eq 1 ]; then
     ls -la "$NATIVE_TOOLS_DIR/"
 
     cd "$BUILD_DIR"
-    echo "=== WASM Phase 2: Building LLVM for WebAssembly ==="
+    echo "=== Phase 2: Building LLVM for $PLATFORM ==="
 fi
+
+# The Phase 1 tools, bundled under <prefix>/{bin,lib} of an artifact: the real
+# clang binary (clang-<major>; clang and clang++ are links to it, copied as
+# links so both names resolve), the tablegens, llvm-config, and the common
+# LLVM binutils libclc's CLC language reaches for (see build-clspv.sh). Clang
+# looks up its builtin headers via <prefix>/lib/clang/<ver>/include/, prefix =
+# dirname(dirname(clang)), so the resource headers ride along.
+bundle_native_tools() { # <prefix>
+    local prefix="$1"
+    echo "Bundling native clang + llvm-link into $prefix/bin/..."
+    mkdir -p "$prefix/bin"
+    for f in "$NATIVE_TOOLS_DIR"/clang "$NATIVE_TOOLS_DIR"/clang-[0-9]* \
+             "$NATIVE_TOOLS_DIR"/clang++ \
+             "$NATIVE_TOOLS_DIR"/llvm-config \
+             "$NATIVE_TOOLS_DIR"/llvm-min-tblgen \
+             "$NATIVE_TOOLS_DIR"/llvm-tblgen \
+             "$NATIVE_TOOLS_DIR"/clang-tblgen \
+             "$NATIVE_TOOLS_DIR"/llvm-ar \
+             "$NATIVE_TOOLS_DIR"/llvm-as \
+             "$NATIVE_TOOLS_DIR"/llvm-dis \
+             "$NATIVE_TOOLS_DIR"/llvm-link \
+             "$NATIVE_TOOLS_DIR"/llvm-nm \
+             "$NATIVE_TOOLS_DIR"/llvm-objcopy \
+             "$NATIVE_TOOLS_DIR"/llvm-objdump \
+             "$NATIVE_TOOLS_DIR"/llvm-ranlib \
+             "$NATIVE_TOOLS_DIR"/llvm-readobj \
+             "$NATIVE_TOOLS_DIR"/llvm-readelf \
+             "$NATIVE_TOOLS_DIR"/llvm-strip \
+             "$NATIVE_TOOLS_DIR"/opt; do
+        [ -e "$f" ] && cp -P "$f" "$prefix/bin/"
+    done
+    # Stripped: the kit is within a few hundred MB of GitHub's 2 GiB asset
+    # cap, and nothing downstream reads these tools' symbols. The copies are
+    # stripped, never the build tree's own (which the build may still need).
+    if [ -x "$NATIVE_TOOLS_DIR/llvm-strip" ]; then
+        for f in "$prefix"/bin/*; do
+            [ -f "$f" ] && [ ! -L "$f" ] && "$NATIVE_TOOLS_DIR/llvm-strip" --strip-all "$f"
+        done
+    fi
+    local native_root
+    native_root="$(dirname "$NATIVE_TOOLS_DIR")"
+    if [ -d "$native_root/lib/clang" ]; then
+        mkdir -p "$prefix/lib/clang"
+        cp -r "$native_root/lib/clang/"* "$prefix/lib/clang/"
+    fi
+}
 
 cd llvm-project
 mkdir -p build
@@ -132,6 +194,15 @@ cd build
 
 # Configure
 WASM_FLAGS=""
+CROSS_FLAGS=""
+if [ "$IS_CROSS" -eq 1 ]; then
+    # The Phase 1 tablegens and tools run on the host; LLVM_HOST_TRIPLE names
+    # the machine the output runs on (and, by default, the triple its clang
+    # compiles for when none is given). LLVM_PARALLEL_LINK_JOBS: each link of
+    # a static all-backends tool wants a few GB; LLVM_LINK_JOBS in the
+    # environment overrides the 2 for a smaller host.
+    CROSS_FLAGS="$CMAKE_CROSS_FLAGS -DLLVM_HOST_TRIPLE=$CROSS_HOST_TRIPLE -DLLVM_TABLEGEN=$NATIVE_TOOLS_DIR/llvm-tblgen -DCLANG_TABLEGEN=$NATIVE_TOOLS_DIR/clang-tblgen -DLLVM_CONFIG_PATH=$NATIVE_TOOLS_DIR/llvm-config -DLLVM_NATIVE_TOOL_DIR=$NATIVE_TOOLS_DIR -DLLVM_PARALLEL_LINK_JOBS=${LLVM_LINK_JOBS:-2}"
+fi
 if [ "$IS_WASM" -eq 1 ]; then
     WASM_FLAGS="-DLLVM_TABLEGEN=$NATIVE_TOOLS_DIR/llvm-tblgen -DCLANG_TABLEGEN=$NATIVE_TOOLS_DIR/clang-tblgen -DLLVM_CONFIG_PATH=$NATIVE_TOOLS_DIR/llvm-config -DLLVM_NATIVE_TOOL_DIR=$NATIVE_TOOLS_DIR -DLLVM_ENABLE_EH=ON -DLLVM_ENABLE_RTTI=ON -DLLVM_BUILD_TOOLS=OFF -DCLANG_BUILD_TOOLS=OFF"
     export LDFLAGS="-sNO_DISABLE_EXCEPTION_CATCHING -sNO_DISABLE_EXCEPTION_THROWING"
@@ -147,7 +218,7 @@ else
     # targets.go: x86-64, x86, aarch64, arm, riscv64, loongarch64, ppc64,
     # ppc64le, systemz, wasm32, wasm64, nvptx64, amdgcn, spirv64) plus NVPTX
     # and AMDGPU for clspv. Spelled out rather than "Native;…" so the dev kit
-    # and the slim clang carry the SAME backend list on all six platforms —
+    # and the slim clang carry the SAME backend list on all seven platforms —
     # e records the backends in e.json, and a drift gate that compares e.json
     # byte for byte across hosts needs one list, not a per-host one. SPIRV is
     # a core target at the pin (llvm/CMakeLists.txt LLVM_ALL_TARGETS) and is
@@ -214,6 +285,7 @@ $CMAKE_CMD ../llvm \
     -DCMAKE_BUILD_TYPE=Release \
     -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
     $WASM_FLAGS \
+    $CROSS_FLAGS \
     $NATIVE_FLAGS \
     -DLLVM_ENABLE_PROJECTS="$LLVM_PROJECTS" \
     -DLLVM_TARGETS_TO_BUILD="$LLVM_TARGETS" \
@@ -255,52 +327,16 @@ if [ "$IS_WASM" -eq 1 ]; then
     # which are owned by the wasm install) so clang's own prefix resolution
     # — realpath(argv[0])/../.. — finds its resource dir at
     # $PACKAGE_DIR/native/lib/clang/<ver>/ without us passing -resource-dir.
-    NATIVE_PREFIX="$PACKAGE_DIR/native"
-    echo "Bundling native clang + llvm-link into $NATIVE_PREFIX/bin/..."
-    mkdir -p "$NATIVE_PREFIX/bin"
-    # The real clang binary is clang-<major>; clang and clang++ are symlinks
-    # to it. Copy the real binary + preserve any clang* symlinks so invoking
-    # "clang" or "clang++" from native/bin/ resolves correctly. Ship:
-    #   - clang/clang++ (compilation)
-    #   - tablegen tools (llvm-min-tblgen, llvm-tblgen, clang-tblgen) so
-    #     downstream wasm cross-compiles (clspv) can pass them via
-    #     LLVM_TABLEGEN/CLANG_TABLEGEN and skip building their own NATIVE
-    #     sub-tree. Without these, clspv's "NATIVE" sub-build gets compiled
-    #     by emmake's inherited em++ env → produces Emscripten JS binaries
-    #     that run under Node's MEMFS → can't see host filesystem files
-    #     like AArch64.td.
-    #   - llvm-config (version/flag queries)
-    #   - common LLVM binutils (ar, as, dis, link, nm, objcopy, objdump,
-    #     opt, ranlib, readobj, strip) — libclc's CLC language calls
-    #     find_llvm_tool on a growing set of these, and we'd rather ship
-    #     them proactively than eat another cache invalidation per tool.
-    for f in "$NATIVE_TOOLS_DIR"/clang "$NATIVE_TOOLS_DIR"/clang-[0-9]* \
-             "$NATIVE_TOOLS_DIR"/clang++ \
-             "$NATIVE_TOOLS_DIR"/llvm-config \
-             "$NATIVE_TOOLS_DIR"/llvm-min-tblgen \
-             "$NATIVE_TOOLS_DIR"/llvm-tblgen \
-             "$NATIVE_TOOLS_DIR"/clang-tblgen \
-             "$NATIVE_TOOLS_DIR"/llvm-ar \
-             "$NATIVE_TOOLS_DIR"/llvm-as \
-             "$NATIVE_TOOLS_DIR"/llvm-dis \
-             "$NATIVE_TOOLS_DIR"/llvm-link \
-             "$NATIVE_TOOLS_DIR"/llvm-nm \
-             "$NATIVE_TOOLS_DIR"/llvm-objcopy \
-             "$NATIVE_TOOLS_DIR"/llvm-objdump \
-             "$NATIVE_TOOLS_DIR"/llvm-ranlib \
-             "$NATIVE_TOOLS_DIR"/llvm-readobj \
-             "$NATIVE_TOOLS_DIR"/llvm-strip \
-             "$NATIVE_TOOLS_DIR"/opt; do
-        [ -e "$f" ] && cp -P "$f" "$NATIVE_PREFIX/bin/"
-    done
-    # Clang looks up its builtin headers (stddef.h, stdint.h, opencl-c.h, ...)
-    # via <prefix>/lib/clang/<ver>/include/, prefix = dirname(dirname(clang)).
-    # Ship the resource headers next to the native binaries.
-    NATIVE_BUILD_ROOT="$(dirname "$NATIVE_TOOLS_DIR")"
-    if [ -d "$NATIVE_BUILD_ROOT/lib/clang" ]; then
-        mkdir -p "$NATIVE_PREFIX/lib/clang"
-        cp -r "$NATIVE_BUILD_ROOT/lib/clang/"* "$NATIVE_PREFIX/lib/clang/"
-    fi
+    # Why these tools: the tablegens (llvm-min-tblgen, llvm-tblgen,
+    # clang-tblgen) let downstream wasm cross-compiles (clspv) pass them via
+    # LLVM_TABLEGEN/CLANG_TABLEGEN and skip building their own NATIVE
+    # sub-tree - without them, clspv's "NATIVE" sub-build gets compiled by
+    # emmake's inherited em++ env, producing Emscripten JS binaries that run
+    # under Node's MEMFS and can't see host files like AArch64.td; llvm-config
+    # for version/flag queries; the common LLVM binutils because libclc's CLC
+    # language calls find_llvm_tool on a growing set of them, and shipping
+    # them proactively beats a cache invalidation per tool.
+    bundle_native_tools "$PACKAGE_DIR/native"
 else
     # Native: cmake --install generates relocatable CMake config
     echo "Installing to $PACKAGE_DIR..."
@@ -316,14 +352,27 @@ else
     # The slim clang asset — clang-<platform>.tar.gz — packaged from this very
     # install tree before anything below touches it. A failure here fails the
     # job: the asset is a release deliverable, and a job that fails caches
-    # nothing, so a half-made asset never lands in the cache either.
+    # nothing, so a half-made asset never lands in the cache either. On the
+    # cross platform the Phase 1 tools strip and read the asset, and running
+    # it (under qemu-user) is required rather than skipped: the leg installs
+    # qemu, so a clang that will not start there is a broken asset.
     echo "Packaging the slim clang asset (scripts/package-clang.sh)..."
     LLVM_INSTALL_DIR="$PACKAGE_DIR" \
     LLVM_SOURCE_DIR="$BUILD_DIR/llvm-project" \
+    LLVM_NATIVE_TOOLS_DIR="${NATIVE_TOOLS_DIR:-}" \
+    PACKAGE_CLANG_REQUIRE_EXEC="${PACKAGE_CLANG_REQUIRE_EXEC:-$IS_CROSS}" \
     PLATFORM="$PLATFORM" \
     LLVM_TAG="$LLVM_TAG" \
     OUTPUT_DIR="$OUTPUT_DIR" \
     bash "$SCRIPT_DIR/package-clang.sh"
+
+    # The cross kit carries the Phase 1 host tools under native/ as the wasm
+    # kit does: clspv's libclc and the translator need a clang and tablegens
+    # that run on the builder, and the cache-hit packaging needs a strip and a
+    # readelf that do. A consumer on the target itself ignores the directory.
+    if [ "$IS_CROSS" -eq 1 ]; then
+        bundle_native_tools "$PACKAGE_DIR/native"
+    fi
 
     # Windows dev kit: cmake --install copies instead of symlinking there
     # (LLVM_USE_SYMLINKS defaults to CMAKE_HOST_UNIX, and LLVMInstallSymlink

@@ -30,7 +30,9 @@ if [[ "$OSTYPE" == "darwin"* ]]; then
     fi
     PLATFORM="darwin-$ARCH"
 elif [[ "$OSTYPE" == "linux-gnu"* ]]; then
-    PLATFORM="linux-$(uname -m)"
+    # CMAKE_ARCH names the target of a Linux cross build (riscv64 on the
+    # x86_64 runner); the host's own architecture otherwise.
+    PLATFORM="linux-${CMAKE_ARCH:-$(uname -m)}"
 elif [[ "$OSTYPE" == "msys" || "$OSTYPE" == "win32" || "$OSTYPE" == "cygwin" ]]; then
     # Use CROSS_COMPILE_TARGET if set, otherwise detect from uname
     if [ -n "$CROSS_COMPILE_TARGET" ]; then
@@ -101,6 +103,18 @@ elif [[ "$OSTYPE" == "linux-gnu"* ]] && [ -n "$CMAKE_ARCH" ] && [ "$CMAKE_ARCH" 
 
     # Set up cross-compilation environment
     export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc
+elif [[ "$OSTYPE" == "linux-gnu"* ]] && [ -n "$CMAKE_ARCH" ] && [ "$CMAKE_ARCH" = "riscv64" ]; then
+    # Linux RISC-V cross-compilation (linux-riscv64 on ubuntu-latest). The
+    # Rust target is tier 2 with host tools; its linker and any C that a
+    # crate's build script compiles come from Ubuntu's cross toolchain.
+    CARGO_TARGET="riscv64gc-unknown-linux-gnu"
+    echo "Cross-compiling for $CARGO_TARGET"
+    rustup target add "$CARGO_TARGET"
+    CARGO_TARGET_FLAG="--target $CARGO_TARGET"
+    export CARGO_TARGET_RISCV64GC_UNKNOWN_LINUX_GNU_LINKER=riscv64-linux-gnu-gcc
+    export CC_riscv64gc_unknown_linux_gnu=riscv64-linux-gnu-gcc
+    export CXX_riscv64gc_unknown_linux_gnu=riscv64-linux-gnu-g++
+    export AR_riscv64gc_unknown_linux_gnu=riscv64-linux-gnu-ar
 elif [[ "$OSTYPE" == "msys" || "$OSTYPE" == "win32" || "$OSTYPE" == "cygwin" ]]; then
     # Windows — use GNU/MinGW ABI to match the rest of the redistributable
     # stack (glslang, spirv-cross, SPIRV-Tools all built with MinGW GCC on

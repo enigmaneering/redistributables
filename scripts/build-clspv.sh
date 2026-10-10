@@ -125,15 +125,16 @@ if [ ! -f "LICENSE" ]; then echo "Error: LICENSE not found"; exit 1; fi
 mkdir -p build
 cd build
 
-# WASM libclc prep. Native clspv builds its own libclc in-tree (its CMake
-# calls clang directly from the local build). That works on native because
-# the clang being built is natively-executable. On WASM, the clang compiled
-# by emcmake is a .wasm module — can't be process-exec'd to drive libclc's
-# per-file .cl → .bc compiles. So we build libclc here first, using the
-# native clang + llvm-link + opt that build-llvm.sh ships at
-# $LLVM_BUILD/native/bin/, and feed the resulting spir-- bitcode to clspv
-# via CLSPV_EXTERNAL_LIBCLC_DIR.
-if [ "$IS_WASM" -eq 1 ]; then
+# WASM and cross libclc prep. Native clspv builds its own libclc in-tree (its
+# CMake calls clang directly from the local build). That works on native
+# because the clang being built is natively-executable. On WASM, the clang
+# compiled by emcmake is a .wasm module — can't be process-exec'd to drive
+# libclc's per-file .cl → .bc compiles; on the cross platform (linux-riscv64
+# on ubuntu-latest) the kit's clang is the target's, and would only run under
+# qemu. So we build libclc here first, using the native clang + llvm-link +
+# opt that build-llvm.sh ships at $LLVM_BUILD/native/bin/, and feed the
+# resulting spir-- bitcode to clspv via CLSPV_EXTERNAL_LIBCLC_DIR.
+if [ "$IS_WASM" -eq 1 ] || [ "$IS_CROSS" -eq 1 ]; then
     NATIVE_BIN="$LLVM_BUILD/native/bin"
     # libclc (libclc/CMakeLists.txt:137) requires clang/opt/llvm-as/llvm-link.
     # clspv's cross-compile needs tablegens (llvm-min-tblgen, llvm-tblgen,
@@ -167,7 +168,7 @@ if [ "$IS_WASM" -eq 1 ]; then
     # $LIBCLC_INSTALL/share/clc and no renaming is needed.
     LIBCLC_SHARE="$LIBCLC_INSTALL/share/clc"
     if [ ! -f "$LIBCLC_SHARE/spir--/libclc.bc" ] || [ ! -f "$LIBCLC_SHARE/spir64--/libclc.bc" ]; then
-        echo "=== WASM libclc prep: building clspv-- and clspv64-- bitcode ==="
+        echo "=== libclc prep ($PLATFORM): building clspv-- and clspv64-- bitcode with the native tools ==="
         rm -rf "$LIBCLC_BUILD"
         # libclc's CMake API has churned twice in our window:
         #   - Originally:  list via LIBCLC_TARGETS_TO_BUILD
@@ -238,14 +239,22 @@ fi
 # Arrays (not strings) so $CMAKE with spaces (e.g. Git Bash resolving to
 # "/c/Program Files/CMake/bin/cmake.exe" when MSYS2 isn't installed on the
 # Windows runner) survives word-splitting at expansion time.
-if [ "$IS_WASM" -eq 1 ]; then
-    CMAKE_CMD=(emcmake "$CMAKE")
-    MAKE_CMD=(emmake "$CMAKE")
+if [ "$IS_WASM" -eq 1 ] || [ "$IS_CROSS" -eq 1 ]; then
+    if [ "$IS_WASM" -eq 1 ]; then
+        CMAKE_CMD=(emcmake "$CMAKE")
+        MAKE_CMD=(emmake "$CMAKE")
+    else
+        CMAKE_CMD=("$CMAKE")
+        MAKE_CMD=("$CMAKE")
+    fi
     # Feed clspv the pre-built native tablegens and native tool dir so LLVM's
     # CrossCompile.cmake skips its NATIVE sub-build. Without these, that
     # sub-build inherits emmake's em++ and produces Emscripten tools that
-    # can't see host files (see build-llvm.sh's native bundle comment).
-    CLSPV_EXTRA="-DCLSPV_EXTERNAL_LIBCLC_DIR=$LIBCLC_DIR \
+    # can't see host files (see build-llvm.sh's native bundle comment); on
+    # the cross platform it would be built for the target and not run at all.
+    # CMAKE_CROSS_FLAGS (common.sh; empty for wasm) names the cross compilers.
+    CLSPV_EXTRA="$CMAKE_CROSS_FLAGS \
+        -DCLSPV_EXTERNAL_LIBCLC_DIR=$LIBCLC_DIR \
         -DLLVM_TABLEGEN=$NATIVE_BIN/llvm-tblgen \
         -DCLANG_TABLEGEN=$NATIVE_BIN/clang-tblgen \
         -DLLVM_CONFIG_PATH=$NATIVE_BIN/llvm-config \

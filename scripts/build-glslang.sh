@@ -29,7 +29,9 @@ if [[ "$OSTYPE" == "darwin"* ]]; then
     fi
     PLATFORM="darwin-$ARCH"
 elif [[ "$OSTYPE" == "linux-gnu"* ]]; then
-    PLATFORM="linux-$(uname -m)"
+    # CMAKE_ARCH names the target of a Linux cross build (riscv64 on the
+    # x86_64 runner); the host's own architecture otherwise.
+    PLATFORM="linux-${CMAKE_ARCH:-$(uname -m)}"
 elif [[ "$OSTYPE" == "msys" || "$OSTYPE" == "win32" || "$OSTYPE" == "cygwin" ]]; then
     # Use CROSS_COMPILE_TARGET if set, otherwise detect from uname
     if [ -n "$CROSS_COMPILE_TARGET" ]; then
@@ -190,6 +192,15 @@ if [[ "$OSTYPE" == "linux-gnu"* ]] && [ -n "$CMAKE_ARCH" ] && [ "$CMAKE_ARCH" = 
     CMAKE_SYSTEM_PROCESSOR="-DCMAKE_SYSTEM_PROCESSOR=aarch64"
     CMAKE_C_COMPILER="-DCMAKE_C_COMPILER=aarch64-linux-gnu-gcc"
     CMAKE_CXX_COMPILER="-DCMAKE_CXX_COMPILER=aarch64-linux-gnu-g++"
+fi
+
+# Linux cross-compilation for RISC-V: linux-riscv64 on ubuntu-latest, with
+# Ubuntu's own cross toolchain (the workflow installs it), the same shape as
+# the ARM64 hook above. CMAKE_SYSTEM_NAME tells CMake this is a cross build.
+if [[ "$OSTYPE" == "linux-gnu"* ]] && [ -n "$CMAKE_ARCH" ] && [ "$CMAKE_ARCH" = "riscv64" ]; then
+    CMAKE_SYSTEM_PROCESSOR="-DCMAKE_SYSTEM_NAME=Linux -DCMAKE_SYSTEM_PROCESSOR=riscv64"
+    CMAKE_C_COMPILER="-DCMAKE_C_COMPILER=riscv64-linux-gnu-gcc"
+    CMAKE_CXX_COMPILER="-DCMAKE_CXX_COMPILER=riscv64-linux-gnu-g++"
 fi
 
 cmake .. \

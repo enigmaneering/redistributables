@@ -5,7 +5,7 @@
 </picture>
 
 This repository releases pre-built tools for [libmental](https://git.enigmaneering.org/mental). All tools are as faithful of upstream builds as possible
-across 7 targets (6 native + WebAssembly).
+across 8 targets (7 native + WebAssembly).
 
 ## Tools
 
@@ -28,13 +28,22 @@ dependencies, not the full library.
 
 All tools except `spirv-to-dxil` and `clang` are provided for:
 - macOS ARM64 / x86_64
-- Linux x86_64 / ARM64
+- Linux x86_64 / ARM64 / RISC-V (riscv64)
 - Windows x86_64 / ARM64
 - WebAssembly
 
+**NOTE:** `linux-riscv64` is the one cross-compiled native platform: GitHub hosts no riscv64 runner, so
+`ubuntu-latest` builds it with Ubuntu's own riscv64 cross toolchain (`scripts/common.sh`'s `IS_CROSS`, the
+two-phase shape the WebAssembly build already has), verifies the tools under qemu-user, and `board.yml`
+proves the assets natively on a VisionFive 2 registered as a self-hosted runner. Its tools need glibc 2.38
+or newer on the target (Ubuntu 24.04 ships 2.39), as the asset's report records. Two tools differ in how
+they are made for it: `wgpu-native` is built from source with Rust's riscv64gc target
+(`scripts/build-wgpu-native.sh`), since gfx-rs publishes no riscv64 binary, and `libfido2` links the
+target's libcrypto and libudev from Ubuntu's riscv64 multiarch packages.
+
 **NOTE:** `spirv-to-dxil` is only used on Windows or WSL targets, as that's the only places where D3D12 lives.
 
-**NOTE:** `clang` (the slim toolchain) is built for the six native platforms and not for WebAssembly: it is a
+**NOTE:** `clang` (the slim toolchain) is built for the seven native platforms and not for WebAssembly: it is a
 compiler that runs on a host, and the WebAssembly LLVM build is a library for running inside one.
 
 ## The slim clang (`clang-<platform>.tar.gz`)
@@ -63,7 +72,7 @@ clang-<platform>/
 
 - **Windows ships no links at all**: one `clang.exe`, one `lld.exe`, one `llvm-objdump.exe`. MSYS2 degrades
   `ln -s` to a copy, a copy of a ~150 MB static binary per alias is not worth shipping, and `e` links
-  WebAssembly there as `lld.exe -flavor wasm`. The archive is `.tar.gz` on all six platforms (e's fetch
+  WebAssembly there as `lld.exe -flavor wasm`. The archive is `.tar.gz` on all seven platforms (e's fetch
   has no xz and no zip need).
 - **Statically linked**: the tools depend on the OS alone — no MSYS2 DLLs (`libstdc++-6`, `libwinpthread-1`,
   `libc++`), no Homebrew dylibs, no distro `libstdc++` of a particular release. Linux links glibc

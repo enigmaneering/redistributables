@@ -59,6 +59,8 @@ else
     CMAKE_CMD=("$CMAKE")
     MAKE_CMD=("$CMAKE")
 fi
+# The cross platform compiles with the cross toolchain (common.sh's
+# CMAKE_CROSS_FLAGS; empty elsewhere) against the kit built the same way.
 
 # Static-only build: libLLVMSPIRVLib.a is the only artifact, with undefined
 # LLVM symbols that the downstream consumer (libmental_llvm.dylib) resolves
@@ -76,6 +78,7 @@ fi
     $CMAKE_OSX_ARCH_FLAG \
     -DCMAKE_BUILD_TYPE=Release \
     -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
+    $CMAKE_CROSS_FLAGS \
     -DLLVM_DIR="$LLVM_BUILD/lib/cmake/llvm" \
     -DBUILD_SHARED_LIBS=OFF \
     -DLLVM_INCLUDE_TESTS=OFF

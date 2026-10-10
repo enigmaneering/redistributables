@@ -46,6 +46,49 @@ elif [[ "$OSTYPE" == "msys" || "$OSTYPE" == "win32" || "$OSTYPE" == "cygwin" ]];
     PLATFORM=$(echo "$PLATFORM" | sed 's/x86_64/amd64/g' | sed 's/aarch64/arm64/g')
 fi
 
+# A cross build: a Linux platform built on a Linux host of another
+# architecture - linux-riscv64 on ubuntu-latest, where GitHub hosts no riscv64
+# runner. The platform names the machine the output runs on; the host's own
+# architecture says whether this is a cross build at all (MENTAL_PLATFORM=
+# linux-riscv64 on a riscv64 host is a native build like any other). The
+# build scripts that know the shape - build-llvm.sh's two phases, clspv's
+# native libclc, the cmake toolchain flags - read IS_CROSS the way they read
+# IS_WASM, and the cross toolchain is Ubuntu's own (g++-<triple> with the
+# -cross libc and libstdc++ packages). What was built runs on the host under
+# qemu-user: qemu-user-static registers riscv64 with binfmt_misc, and
+# QEMU_LD_PREFIX points it at the cross libc's loader and libraries.
+IS_CROSS=0
+CROSS_ARCH=""          # the target's uname -m
+CROSS_TRIPLE=""        # the GNU toolchain prefix (riscv64-linux-gnu)
+CROSS_HOST_TRIPLE=""   # what LLVM calls the machine its tools will run on
+CMAKE_CROSS_FLAGS=""   # for every cmake configure of a cross build
+if [[ "$OSTYPE" == "linux-gnu"* ]] && [ "$IS_WASM" -eq 0 ]; then
+    HOST_ARCH="$(uname -m | sed 's/x86_64/amd64/; s/aarch64/arm64/')"
+    case "$PLATFORM" in
+        linux-*) if [ "${PLATFORM#linux-}" != "$HOST_ARCH" ]; then IS_CROSS=1; CROSS_ARCH="${PLATFORM#linux-}"; fi ;;
+    esac
+    if [ "$IS_CROSS" -eq 1 ]; then
+        case "$CROSS_ARCH" in
+            riscv64) CROSS_TRIPLE="riscv64-linux-gnu"; CROSS_HOST_TRIPLE="riscv64-unknown-linux-gnu" ;;
+            *) echo "Error: $PLATFORM on a $HOST_ARCH host - no cross toolchain is known for it (linux-riscv64 is the one cross platform)"; exit 1 ;;
+        esac
+        for t in gcc g++; do
+            if ! command -v "$CROSS_TRIPLE-$t" >/dev/null 2>&1; then
+                echo "Error: $CROSS_TRIPLE-$t is not installed (apt-get install g++-$CROSS_TRIPLE libc6-dev-$CROSS_ARCH-cross libstdc++-13-dev-$CROSS_ARCH-cross binutils-$CROSS_TRIPLE qemu-user-static)"
+                exit 1
+            fi
+        done
+        CMAKE_CROSS_FLAGS="-DCMAKE_SYSTEM_NAME=Linux -DCMAKE_SYSTEM_PROCESSOR=$CROSS_ARCH -DCMAKE_C_COMPILER=$CROSS_TRIPLE-gcc -DCMAKE_CXX_COMPILER=$CROSS_TRIPLE-g++"
+        export QEMU_LD_PREFIX="${QEMU_LD_PREFIX:-/usr/$CROSS_TRIPLE}"
+        # A configure's try_run, should one arise, runs the target's test
+        # program under qemu rather than failing the cross-compiling check.
+        if command -v "qemu-$CROSS_ARCH-static" >/dev/null 2>&1; then
+            CMAKE_CROSS_FLAGS="$CMAKE_CROSS_FLAGS -DCMAKE_CROSSCOMPILING_EMULATOR=qemu-$CROSS_ARCH-static"
+        fi
+        echo "Cross build: $PLATFORM on $HOST_ARCH with $CROSS_TRIPLE-g++ (QEMU_LD_PREFIX=$QEMU_LD_PREFIX)"
+    fi
+fi
+
 # Parallelism. NCPU in the environment wins (a workflow can pin it); otherwise
 # every core on Linux and Windows — the hard-coded 2 dated from when GitHub's
 # hosted runners had two cores; they have had four since January 2024, and the
@@ -88,5 +131,15 @@ if [ -n "$MACOS_ARCH" ]; then
 fi
 if [[ "$OSTYPE" == "msys" || "$OSTYPE" == "win32" || "$OSTYPE" == "cygwin" ]]; then
     CMAKE_GENERATOR="-G Ninja"
+fi
+# The cross build links its all-backends tools with GNU ld for the target,
+# a few GB each; LLVM_PARALLEL_LINK_JOBS (build-llvm.sh) caps how many run
+# at once, and only Ninja honours it. The workflow installs ninja-build.
+if [ "${IS_CROSS:-0}" -eq 1 ]; then
+    if command -v ninja >/dev/null 2>&1; then
+        CMAKE_GENERATOR="-G Ninja"
+    else
+        echo "Error: a cross build needs ninja (apt-get install ninja-build)"; exit 1
+    fi
 fi
 

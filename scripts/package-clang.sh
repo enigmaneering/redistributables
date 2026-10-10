@@ -15,9 +15,17 @@ set -e
 #   LLVM_INSTALL_DIR  the cmake --install prefix (…/output/llvm-<platform>)       required
 #   LLVM_SOURCE_DIR   the llvm-project checkout (llvm/, clang/, lld/ LICENSE.TXT)  required
 #   PLATFORM          darwin-arm64 | darwin-amd64 | linux-amd64 | linux-arm64 |
-#                     windows-amd64 | windows-arm64 (no slim clang for wasm)       required
+#                     linux-riscv64 | windows-amd64 | windows-arm64
+#                     (no slim clang for wasm)                                      required
 #   LLVM_TAG          the LLVM commit that was built; becomes VERSION              required
 #   OUTPUT_DIR        where clang-<platform>.tar.gz and .report.txt land            required
+#   LLVM_NATIVE_TOOLS_DIR  a bin/ of host-native LLVM tools (build-llvm.sh's
+#                     Phase 1, or a kit's native/bin): preferred for stripping
+#                     and reading the asset when the install tree's own tools
+#                     are the target's, as on the cross platform               optional
+#   PACKAGE_CLANG_REQUIRE_EXEC  1: a bin/clang this host cannot execute is a
+#                     failure, not a skipped check - the cross leg runs the
+#                     asset under qemu-user and must prove it starts; default 0
 #   CLANG_ASSET_MAX_BYTES  cap for the tarball; default 104857600 (100 MiB, the
 #                     gameplan's figure — the report prints the real number so
 #                     e's doctor text can say what was measured)
@@ -101,8 +109,8 @@ mkdir -p "$OUTPUT_DIR"
 
 case "$PLATFORM" in
     windows-amd64|windows-arm64) EXE=".exe"; LINKS=0 ;;
-    darwin-arm64|darwin-amd64|linux-amd64|linux-arm64) EXE=""; LINKS=1 ;;
-    *) die "no slim clang is built for PLATFORM='$PLATFORM' (six native platforms only, no wasm)" ;;
+    darwin-arm64|darwin-amd64|linux-amd64|linux-arm64|linux-riscv64) EXE=""; LINKS=1 ;;
+    *) die "no slim clang is built for PLATFORM='$PLATFORM' (seven native platforms only, no wasm)" ;;
 esac
 case "$(uname -s)" in
     Darwin) HOST=darwin ;;
@@ -110,6 +118,17 @@ case "$(uname -s)" in
     MSYS*|MINGW*|CYGWIN*) HOST=windows ;;
     *) HOST=unknown ;;
 esac
+# A Linux asset of another architecture than this host's (linux-riscv64 on
+# ubuntu-latest): its tools run here only under qemu-user, and the reads that
+# ldd cannot do on a foreign binary go through llvm-readobj instead.
+CROSS=0
+if [ "$HOST" = linux ]; then
+    case "$PLATFORM" in
+        linux-*) [ "${PLATFORM#linux-}" = "$(uname -m | sed 's/x86_64/amd64/; s/aarch64/arm64/')" ] || CROSS=1 ;;
+    esac
+fi
+NATIVE_TOOLS="${LLVM_NATIVE_TOOLS_DIR:-}"
+REQUIRE_EXEC="${PACKAGE_CLANG_REQUIRE_EXEC:-0}"
 CAP="${CLANG_ASSET_MAX_BYTES:-104857600}"
 
 NAME="clang-$PLATFORM"
@@ -117,7 +136,7 @@ STAGE="$OUTPUT_DIR/$NAME"
 TARBALL="$OUTPUT_DIR/$NAME.tar.gz"
 REPORT="$OUTPUT_DIR/$NAME.report.txt"
 
-say "packaging $NAME from $LLVM_INSTALL_DIR (LLVM $LLVM_TAG, host $HOST)"
+say "packaging $NAME from $LLVM_INSTALL_DIR (LLVM $LLVM_TAG, host $HOST$([ "$CROSS" -eq 1 ] && echo ", cross: the asset runs here under qemu-user"))"
 
 # The resource directory: exactly one lib/clang/<major>/include is expected.
 MAJOR=""
@@ -164,13 +183,15 @@ cp "$LLVM_SOURCE_DIR/clang/LICENSE.TXT" "$STAGE/LICENSES/Clang-LICENSE.TXT"
 cp "$LLVM_SOURCE_DIR/lld/LICENSE.TXT"   "$STAGE/LICENSES/LLD-LICENSE.TXT"
 
 # ---------------------------------------------------------------- strip
-# The tree's own llvm-strip first (one tool, three object formats, always
-# present because llvm-objcopy is in LLVM's default build; verified locally
-# to leave an arm64 Mach-O ad-hoc signature valid), then a PATH llvm-strip,
-# then GNU strip, then Apple's strip (no --version, no --strip-all).
+# A host-native llvm-strip first when one was handed over (the cross leg's
+# Phase 1 tools: the tree's own would run under qemu), then the tree's own
+# llvm-strip (one tool, three object formats, always present because
+# llvm-objcopy is in LLVM's default build; verified locally to leave an arm64
+# Mach-O ad-hoc signature valid), then a PATH llvm-strip, then GNU strip,
+# then Apple's strip (no --version, no --strip-all).
 STRIP=""
 STRIP_KIND=""
-for cand in "$LLVM_INSTALL_DIR/bin/llvm-strip$EXE" "$(command -v llvm-strip 2>/dev/null || true)" "$(command -v strip 2>/dev/null || true)"; do
+for cand in "${NATIVE_TOOLS:+$NATIVE_TOOLS/llvm-strip}" "$LLVM_INSTALL_DIR/bin/llvm-strip$EXE" "$(command -v llvm-strip 2>/dev/null || true)" "$(command -v strip 2>/dev/null || true)"; do
     [ -n "$cand" ] && [ -x "$cand" ] || continue
     if "$cand" --version >/dev/null 2>&1; then
         STRIP="$cand"
@@ -226,7 +247,11 @@ set +e
 "$CLANG" --version > "$TMP/version.txt" 2>&1
 rc=$?
 set -e
-if [ $rc -eq 126 ]; then
+if [ $rc -eq 126 ] && [ "$REQUIRE_EXEC" = "1" ]; then
+    cat "$TMP/version.txt" >&2
+    fail "bin/clang cannot execute on this host (exit 126) and PACKAGE_CLANG_REQUIRE_EXEC=1: is qemu-user-static installed and QEMU_LD_PREFIX (${QEMU_LD_PREFIX:-unset}) the cross libc?"
+    CAN_RUN=0
+elif [ $rc -eq 126 ]; then
     CAN_RUN=0
     warn "bin/clang cannot execute on this host (exit 126: foreign architecture, no Rosetta?) — skipping the execution checks"
     report "execution checks: SKIPPED (cannot run $PLATFORM binaries on this host)"
@@ -402,7 +427,19 @@ deps_of() { # prints one dependency name per line for the host's format
         darwin)
             otool -L "$1" | tail -n +2 | awk '{print $1}' ;;
         linux)
-            ldd "$1" 2>/dev/null | awk '{print $1}' | grep -v '^statically' ;;
+            if [ "$CROSS" -eq 1 ]; then
+                # ldd cannot follow a foreign binary; the DT_NEEDED list is the
+                # same question asked of the ELF itself. Transitive needs of
+                # libc are libc's own business on the target.
+                local ro=""
+                for cand in "${NATIVE_TOOLS:+$NATIVE_TOOLS/llvm-readobj}" "$LLVM_INSTALL_DIR/bin/llvm-readobj" "$(command -v llvm-readobj 2>/dev/null || true)"; do
+                    [ -n "$cand" ] && [ -x "$cand" ] && "$cand" --version >/dev/null 2>&1 && { ro="$cand"; break; }
+                done
+                [ -n "$ro" ] || die "no llvm-readobj to read the dependencies of a $PLATFORM binary on this host"
+                "$ro" --needed-libs "$1" | grep -E '^[[:space:]]+[^[:space:]]+\.so' | awk '{print $1}'
+            else
+                ldd "$1" 2>/dev/null | awk '{print $1}' | grep -v '^statically'
+            fi ;;
         windows)
             local ro="$LLVM_INSTALL_DIR/bin/llvm-readobj$EXE"
             [ -x "$ro" ] || ro="$(command -v llvm-readobj 2>/dev/null || true)"
@@ -451,6 +488,7 @@ if [ "$HOST" != unknown ]; then
     case "$HOST" in
         linux)
             RE="$LLVM_INSTALL_DIR/bin/llvm-readelf"
+            if [ -n "$NATIVE_TOOLS" ] && [ -x "$NATIVE_TOOLS/llvm-readelf" ]; then RE="$NATIVE_TOOLS/llvm-readelf"; fi
             if [ -x "$RE" ] && "$RE" --version >/dev/null 2>&1; then
                 FLOOR="$("$RE" --dyn-syms "$CLANG" | grep -o 'GLIBC_[0-9][0-9.]*' | sort -uV | tail -1)"
             else
