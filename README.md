@@ -16,7 +16,7 @@ across 8 targets (7 native + WebAssembly).
 | **spirv-to-dxil** | SPIR-V to DXIL (D3D12 backend; carve-out of Mesa) | [Mesa](https://gitlab.freedesktop.org/mesa/mesa) |
 | **Naga** | WGSL to/from SPIR-V (shared library via FFI) | [gfx-rs](https://github.com/gfx-rs/wgpu) |
 | **wgpu-native** | WebGPU runtime (Metal/Vulkan/D3D12/OpenGL) | [gfx-rs](https://github.com/gfx-rs/wgpu-native) |
-| **LLVM** | LLVM + Clang + LLD dev kit (static archives, headers, tools, source): backends X86, ARM, AArch64, RISC-V, LoongArch, PowerPC, SystemZ, WebAssembly, NVPTX, AMDGPU, SPIRV | [LLVM](https://github.com/llvm/llvm-project) |
+| **LLVM** | LLVM + Clang + LLD dev kit (the static archives of every backend, headers and CMake configs for linking LLVM into a runtime, and the tools the pipeline runs - `scripts/build-llvm.sh`'s `KIT_TOOLS`; the source is the commit `VERSION` names): backends X86, ARM, AArch64, RISC-V, LoongArch, PowerPC, SystemZ, WebAssembly, NVPTX, AMDGPU, SPIRV | [LLVM](https://github.com/llvm/llvm-project) |
 | **clang** | the slim pinned toolchain [enigmatic](https://git.enigmaneering.org/enigmatic)'s `e fetch clang` installs: `bin/clang`, `bin/lld`, `bin/llvm-objdump`, the builtin headers — same build, same backends, one commit on every host | [LLVM](https://github.com/llvm/llvm-project) |
 | **clspv** | OpenCL C to Vulkan SPIR-V | [Google](https://github.com/google/clspv) |
 | **SPIRV-LLVM-Translator** | SPIR-V ↔ LLVM IR bridge | [Khronos](https://github.com/KhronosGroup/SPIRV-LLVM-Translator) |

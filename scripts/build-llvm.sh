@@ -2,8 +2,9 @@
 set -e
 
 # Build LLVM + Clang (+ LLD on the native platforms) for libmental.
-# Produces the llvm-<platform> dev kit (static archives, headers, tools and the
-# full source tree) that clspv and spirv-llvm-translator build against, and —
+# Produces the llvm-<platform> dev kit (the static archives of every backend,
+# the headers and CMake configs, and the tools named in KIT_TOOLS below) that
+# libmental links and clspv and spirv-llvm-translator build against, and —
 # on the seven native platforms — the slim clang-<platform> asset that
 # enigmatic's `e fetch clang` installs (scripts/package-clang.sh, from the
 # SAME build tree, so e's compiler on every host is this release's compiler).
@@ -186,6 +187,34 @@ bundle_native_tools() { # <prefix>
         mkdir -p "$prefix/lib/clang"
         cp -r "$native_root/lib/clang/"* "$prefix/lib/clang/"
     fi
+}
+
+# The tools the kit keeps in bin/. cmake --install puts every one of LLVM's
+# 113 tools there, each a static binary carrying all eleven backends, and the
+# ninety-odd nobody in the ecosystem runs weighed more than half of every kit;
+# with eight platforms that pushed the LLVM caches past GitHub's 10 GB per
+# repository, and every release rebuilt whatever had been evicted. What stays
+# is what the pipeline runs and a toolkit shells out to: package-clang.sh's
+# clang, lld, llvm-objdump, llvm-strip and llvm-readelf; clspv's libclc and
+# CMake (clang, opt, llvm-link, llvm-as, llvm-ar, llvm-ranlib, llvm-config,
+# the tablegens); and the IR and object tools (llc, llvm-mc, llvm-dis, llvm-nm,
+# llvm-objcopy, llvm-readobj). The real clang binary, clang-<major>, stays
+# with its links. Adding a tool is one name here. The archives, headers and
+# CMake configs the runtime consumers link, and the slim clang asset, are not
+# touched by this list.
+KIT_TOOLS="clang clang++ clang-cpp lld ld.lld ld64.lld lld-link wasm-ld llvm-objdump llvm-strip llvm-objcopy llvm-readobj llvm-readelf llvm-ar llvm-ranlib llvm-nm llvm-as llvm-dis llvm-link opt llc llvm-mc llvm-config llvm-tblgen clang-tblgen llvm-min-tblgen"
+prune_kit_tools() { # <bin dir> <exe suffix or empty>
+    local bindir="$1" exe="$2" f name keep kept=0 dropped=0
+    for f in "$bindir"/*; do
+        [ -e "$f" ] || [ -L "$f" ] || continue
+        name="$(basename "$f")"
+        [ -n "$exe" ] && name="${name%"$exe"}"
+        keep=0
+        case " $KIT_TOOLS " in *" $name "*) keep=1 ;; esac
+        case "$name" in clang-[0-9]*) keep=1 ;; esac
+        if [ "$keep" -eq 1 ]; then kept=$((kept + 1)); else rm -f "$f"; dropped=$((dropped + 1)); fi
+    done
+    echo "  kit bin/: kept $kept tools, dropped $dropped"
 }
 
 cd llvm-project
@@ -374,6 +403,14 @@ else
         bundle_native_tools "$PACKAGE_DIR/native"
     fi
 
+    # The kit keeps KIT_TOOLS and nothing else in bin/ - after the slim clang
+    # was packaged from the full install tree, and before the dev kit is tarred.
+    echo "Pruning the dev kit's bin/ to KIT_TOOLS..."
+    case "$OSTYPE" in
+        msys*|win32*|cygwin*) prune_kit_tools "$PACKAGE_DIR/bin" ".exe" ;;
+        *) prune_kit_tools "$PACKAGE_DIR/bin" "" ;;
+    esac
+
     # Windows dev kit: cmake --install copies instead of symlinking there
     # (LLVM_USE_SYMLINKS defaults to CMAKE_HOST_UNIX, and LLVMInstallSymlink
     # .cmake then runs `cmake -E copy`), so clang's four driver aliases and
@@ -402,24 +439,13 @@ else
     fi
 fi
 
-# Bundle the FULL llvm-project source tree into the artifact so downstream
-# consumers (clspv, spirv-llvm-translator) can reference any file they need.
-# LLVM is a monorepo with heavy cross-subtree dependencies — clspv alone
-# touches llvm/, clang/, cmake/, third-party/ (SipHash), runtimes/ and the
-# add_subdirectory() graph reaches into test/, examples/, unittests/, etc.
-# Earlier attempts to prune heavy bits (test/, examples/, docs/...) triggered
-# cascading "missing directory" failures. Bundle everything minus .git and
-# build outputs; let CMake flags decide what actually gets built.
-#
-# common.sh normalizes $OUTPUT_DIR (and therefore $PACKAGE_DIR) to POSIX form
-# on MSYS2 via cygpath, so no drive-letter colons reach tar's path parser here.
-echo "Bundling full llvm-project source tree into $PACKAGE_DIR/src..."
-mkdir -p "$PACKAGE_DIR/src"
-tar -cf - \
-    --exclude=.git \
-    --exclude=build \
-    --exclude=build-native \
-    -C .. . | tar -xf - -C "$PACKAGE_DIR/src"
+# No source tree in the kit. Until v0.0.88 every kit carried the whole
+# llvm-project checkout under src/ for clspv's build (its CMake pulls in llvm/,
+# clang/, libclc/, cmake/, third-party/ and whatever add_subdirectory reaches):
+# 352 MB compressed, identical in all eight kits. build-clspv.sh now fetches
+# that tree itself at the commit VERSION names, once per job. (A reused
+# OUTPUT_DIR from an older run may still hold one; it must not ride along.)
+rm -rf "$PACKAGE_DIR/src"
 
 # Record the LLVM commit/tag we built so consumers can verify version
 # match. $LLVM_TAG is whatever the resolver produced: a SHA (typical CI

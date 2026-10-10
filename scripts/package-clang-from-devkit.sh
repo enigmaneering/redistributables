@@ -8,10 +8,12 @@ set -eu
 # asset from the dev kit the cache restored: it takes the members
 # package-clang.sh reads out of llvm-<platform>.tar.gz (the cmake --install
 # prefix's bin/ tools and lib/clang/<major>/ headers, VERSION, and the three
-# license texts of the bundled src/ tree — nothing else of the ~2 GB kit
-# is unpacked) and runs package-clang.sh over them, exactly as build-llvm.sh
-# does over the fresh install tree. The tools are the same bytes, so the
-# asset is the same asset; only tar's recorded mtimes differ.
+# license texts under LICENSES/ — nothing else of the kit is unpacked) and
+# runs package-clang.sh over them, exactly as build-llvm.sh does over the
+# fresh install tree. The tools are the same bytes, so the asset is the same
+# asset; only tar's recorded mtimes differ. package-clang.sh reads the
+# licenses as <llvm-project>/{llvm,clang,lld}/LICENSE.TXT, so the kit's
+# three are laid out that way under WORK_DIR for it.
 #
 # It is deliberately NOT in build-llvm's cache key (scripts/build-llvm.sh,
 # common.sh, package-clang.sh): it runs only on a hit and decides nothing
@@ -92,9 +94,9 @@ say "$(wc -l < "$LIST" | tr -d ' ') members"
 
 MEMBERS=(
     "$KIT_NAME/VERSION"
-    "$KIT_NAME/src/llvm/LICENSE.TXT"
-    "$KIT_NAME/src/clang/LICENSE.TXT"
-    "$KIT_NAME/src/lld/LICENSE.TXT"
+    "$KIT_NAME/LICENSES/LLVM-LICENSE.TXT"
+    "$KIT_NAME/LICENSES/Clang-LICENSE.TXT"
+    "$KIT_NAME/LICENSES/LLD-LICENSE.TXT"
     "$KIT_NAME/bin/clang$EXE"
     "$KIT_NAME/bin/lld$EXE"
     "$KIT_NAME/bin/llvm-objdump$EXE"
@@ -141,7 +143,12 @@ printf '  %s\n' "${MEMBERS[@]}"
 tar -xzf "$KIT" -C "$WORK_DIR" "${MEMBERS[@]}"
 [ -d "$ROOT/bin" ] || die "$ROOT/bin did not land"
 [ -d "$ROOT/lib/clang" ] || die "$ROOT/lib/clang did not land"
-[ -f "$ROOT/src/llvm/LICENSE.TXT" ] || die "$ROOT/src/llvm/LICENSE.TXT did not land"
+[ -f "$ROOT/LICENSES/LLVM-LICENSE.TXT" ] || die "$ROOT/LICENSES/LLVM-LICENSE.TXT did not land"
+# The layout package-clang.sh reads the licenses from.
+for pair in llvm:LLVM clang:Clang lld:LLD; do
+    mkdir -p "$ROOT/src/${pair%%:*}"
+    cp "$ROOT/LICENSES/${pair##*:}-LICENSE.TXT" "$ROOT/src/${pair%%:*}/LICENSE.TXT"
+done
 [ -e "$ROOT/bin/clang$EXE" ] || die "$ROOT/bin/clang$EXE did not land"
 LLVM_TAG="$(tr -d '\r\n ' < "$ROOT/VERSION")"
 [ -n "$LLVM_TAG" ] || die "$ROOT/VERSION is empty"

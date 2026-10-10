@@ -18,23 +18,21 @@ if [ ! -d "$LLVM_BUILD/lib/cmake/llvm" ]; then
     echo "Build llvm first, or set LLVM_BUILD_DIR"
     exit 1
 fi
-if [ ! -d "$LLVM_BUILD/src/llvm" ] || [ ! -d "$LLVM_BUILD/src/clang" ]; then
-    echo "Error: llvm/clang source tree not found in artifact at $LLVM_BUILD/src/"
-    echo "build-llvm.sh must bundle the source tree alongside the install tree"
-    exit 1
-fi
 echo "Using llvm from: $LLVM_BUILD"
 
-# clspv pulls LLVM's source CMakeLists.txt, which needs sibling directories
-# of llvm/ (cmake/, third-party/) that the LLVM artifact doesn't bundle to
-# keep it small. Fetch them here at the tag recorded in VERSION. This does
-# NOT touch build-llvm.sh, so the cached LLVM artifacts remain valid.
-#   - cmake/        — LLVM's shared cmake modules (included via ../cmake/...)
-#   - third-party/  — vendored sources (e.g. siphash/SipHash.h for
-#                     LLVMSupport, unittest/ for gtest when tests enabled)
-if [ ! -d "$LLVM_BUILD/src/cmake" ] || [ ! -d "$LLVM_BUILD/src/third-party" ]; then
+# The source tree clspv's CMake pulls in - llvm/, clang/, libclc/, cmake/,
+# third-party/ (SipHash for LLVMSupport) and whatever add_subdirectory()
+# reaches from there. The kit carries no source (it did until v0.0.88, 352 MB
+# compressed in every one of eight kits); it is fetched here at the commit the
+# kit's VERSION names - a SHA, so the codeload tarball rather than a clone -
+# and laid down as $LLVM_BUILD/src, the path every flag below names. LLVM is
+# a monorepo with heavy cross-subtree dependencies, and pruning its heavy
+# bits (test/, examples/, docs/...) once caused cascading "missing directory"
+# failures, so the whole tree is kept and the CMake flags decide what builds.
+if [ ! -d "$LLVM_BUILD/src/llvm" ] || [ ! -d "$LLVM_BUILD/src/clang" ] || [ ! -d "$LLVM_BUILD/src/libclc" ] \
+   || [ ! -d "$LLVM_BUILD/src/cmake" ] || [ ! -d "$LLVM_BUILD/src/third-party" ]; then
     if [ ! -f "$LLVM_BUILD/VERSION" ]; then
-        echo "Error: $LLVM_BUILD/VERSION missing; can't determine LLVM tag for sibling fetch"
+        echo "Error: $LLVM_BUILD/VERSION missing; can't determine the LLVM commit to fetch"
         exit 1
     fi
     LLVM_TAG="$(head -n1 "$LLVM_BUILD/VERSION" | tr -d '\r\n ')"
@@ -42,18 +40,15 @@ if [ ! -d "$LLVM_BUILD/src/cmake" ] || [ ! -d "$LLVM_BUILD/src/third-party" ]; t
         echo "Error: $LLVM_BUILD/VERSION is empty"
         exit 1
     fi
-    echo "Fetching LLVM sibling dirs (cmake/, third-party/) at $LLVM_TAG..."
-    FETCH_DIR="$BUILD_DIR/llvm-sibling-fetch"
+    echo "Fetching llvm-project at $LLVM_TAG into $LLVM_BUILD/src..."
+    FETCH_DIR="$BUILD_DIR/llvm-src-fetch"
     rm -rf "$FETCH_DIR"
-    # $LLVM_TAG is now a commit SHA (build-llvm.sh pins to clspv's pinned
-    # commit), not a branch/tag name. Use codeload tarball instead of git
-    # clone so we don't need to resolve the SHA as a ref.
-    curl -sSLf "https://codeload.github.com/llvm/llvm-project/tar.gz/$LLVM_TAG" | \
-        tar -xz -C "$BUILD_DIR" && \
-        mv "$BUILD_DIR/llvm-project-$LLVM_TAG" "$FETCH_DIR"
-    [ ! -d "$LLVM_BUILD/src/cmake" ] && cp -r "$FETCH_DIR/cmake" "$LLVM_BUILD/src/cmake"
-    [ ! -d "$LLVM_BUILD/src/third-party" ] && cp -r "$FETCH_DIR/third-party" "$LLVM_BUILD/src/third-party"
-    rm -rf "$FETCH_DIR"
+    mkdir -p "$FETCH_DIR"
+    curl -sSLf "https://codeload.github.com/llvm/llvm-project/tar.gz/$LLVM_TAG" | tar -xz -C "$FETCH_DIR"
+    [ -d "$FETCH_DIR/llvm-project-$LLVM_TAG/llvm" ] || { echo "Error: the fetched tree has no llvm/ (got: $(ls "$FETCH_DIR"))"; exit 1; }
+    rm -rf "$LLVM_BUILD/src"
+    mv "$FETCH_DIR/llvm-project-$LLVM_TAG" "$LLVM_BUILD/src"
+    rmdir "$FETCH_DIR" 2>/dev/null || true
 fi
 
 # Stub out subdirectories that build-llvm.sh excluded from the LLVM/Clang
