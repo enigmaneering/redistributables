@@ -40,15 +40,24 @@ if [ ! -d "$LLVM_BUILD/src/llvm" ] || [ ! -d "$LLVM_BUILD/src/clang" ] || [ ! -d
         echo "Error: $LLVM_BUILD/VERSION is empty"
         exit 1
     fi
+    # Fetched with git, not as a tarball, the way build-llvm.sh fetches the
+    # tree it builds: LLVM's test fixtures carry symlinks that MSYS2's tar
+    # cannot create (v0.0.88's windows-amd64 clspv leg died on them), while
+    # git degrades them to plain files where native symlinks are unavailable.
+    # A single-commit fetch: GitHub serves any SHA to `git fetch`.
     echo "Fetching llvm-project at $LLVM_TAG into $LLVM_BUILD/src..."
-    FETCH_DIR="$BUILD_DIR/llvm-src-fetch"
-    rm -rf "$FETCH_DIR"
-    mkdir -p "$FETCH_DIR"
-    curl -sSLf "https://codeload.github.com/llvm/llvm-project/tar.gz/$LLVM_TAG" | tar -xz -C "$FETCH_DIR"
-    [ -d "$FETCH_DIR/llvm-project-$LLVM_TAG/llvm" ] || { echo "Error: the fetched tree has no llvm/ (got: $(ls "$FETCH_DIR"))"; exit 1; }
     rm -rf "$LLVM_BUILD/src"
-    mv "$FETCH_DIR/llvm-project-$LLVM_TAG" "$LLVM_BUILD/src"
-    rmdir "$FETCH_DIR" 2>/dev/null || true
+    mkdir -p "$LLVM_BUILD/src"
+    (
+        cd "$LLVM_BUILD/src"
+        git init -q
+        git remote add origin https://github.com/llvm/llvm-project.git
+        git -c advice.detachedHead=false fetch --depth 1 -q origin "$LLVM_TAG"
+        git -c advice.detachedHead=false checkout -q FETCH_HEAD
+    )
+    for required in llvm/CMakeLists.txt clang/CMakeLists.txt libclc/CMakeLists.txt cmake third-party; do
+        [ -e "$LLVM_BUILD/src/$required" ] || { echo "Error: the fetched tree lacks $required"; exit 1; }
+    done
 fi
 
 # Stub out subdirectories that build-llvm.sh excluded from the LLVM/Clang
