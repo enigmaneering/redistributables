@@ -216,6 +216,35 @@ prune_kit_tools() { # <bin dir> <exe suffix or empty>
     done
     echo "  kit bin/: kept $kept tools, dropped $dropped"
 }
+# The kit's CMake exports (lib/cmake/llvm/LLVMExports-release.cmake and
+# clang's ClangTargets-release.cmake) name every installed tool as an
+# imported target and, at the end, verify that each imported file exists -
+# find_package(LLVM) fails on the first one that does not, which is how
+# v0.0.88's clspv legs died on llvm-ctxprof-util. After the pruning, the two
+# check lines of every tool that is gone are removed; the imported targets
+# themselves stay, inert, and every archive's check stays with its file.
+prune_kit_exports() { # <kit dir> - after bin/ was pruned
+    local kit="$1" f line t path dropped=0 kept=0
+    for f in "$kit"/lib/cmake/*/*-release.cmake; do
+        [ -f "$f" ] || continue
+        grep -E '^list\(APPEND _cmake_import_check_files_for_' "$f" > "$f.checks" || true
+        while IFS= read -r line; do
+            t="$(printf '%s\n' "$line" | sed -E 's/^list\(APPEND _cmake_import_check_files_for_([^ ]+) .*/\1/')"
+            path="$(printf '%s\n' "$line" | sed -E 's/.*"\$\{_IMPORT_PREFIX\}\/([^"]+)".*/\1/')"
+            if [ -z "$t" ] || [ -z "$path" ] || [ "$path" = "$line" ]; then
+                echo "Error: cannot parse an import check in $f: $line"; exit 1
+            fi
+            if [ -e "$kit/$path" ]; then
+                kept=$((kept + 1))
+            else
+                sed -i.bak -e "/_cmake_import_check_files_for_$t /d" -e "/_cmake_import_check_targets $t )/d" "$f"
+                dropped=$((dropped + 1))
+            fi
+        done < "$f.checks"
+        rm -f "$f.checks" "$f.bak"
+    done
+    echo "  kit cmake exports: kept the existence checks of $kept files, dropped $dropped removed tools'"
+}
 
 cd llvm-project
 mkdir -p build
@@ -410,6 +439,7 @@ else
         msys*|win32*|cygwin*) prune_kit_tools "$PACKAGE_DIR/bin" ".exe" ;;
         *) prune_kit_tools "$PACKAGE_DIR/bin" "" ;;
     esac
+    prune_kit_exports "$PACKAGE_DIR"
 
     # Windows dev kit: cmake --install copies instead of symlinking there
     # (LLVM_USE_SYMLINKS defaults to CMAKE_HOST_UNIX, and LLVMInstallSymlink
